@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { Server as HttpServer } from 'node:http';
 
-import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { hostHeaderValidation } from '@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import express from 'express';
 import type { Express, Request, Response } from 'express';
 
 import { config } from './config.js';
@@ -37,12 +38,11 @@ function readSessionHeader(req: Request): string | undefined {
 }
 
 function createApp(sessions: Map<string, McpSession>): Express {
-    const app = createMcpExpressApp(
-        config.ALLOWED_HOSTS.length > 0
-            ? { host: config.HOST, allowedHosts: [...LOCALHOST_HOSTNAMES, ...config.ALLOWED_HOSTS] }
-            : { host: config.HOST },
-    );
+    const app = express();
 
+    // Logging goes first, ahead of the DNS-rebinding guard: a rejected Host
+    // header is exactly the failure to debug when putting a tunnel in front of
+    // the server, and `createMcpExpressApp` would hide it behind the guard.
     app.use((req, res, next) => {
         const requestId = randomUUID();
         res.locals.requestId = requestId;
@@ -55,6 +55,8 @@ function createApp(sessions: Map<string, McpSession>): Express {
                 method: req.method,
                 path: req.path,
                 status: res.statusCode,
+                // Logged so a 403 from the guard below names the rejected host.
+                host: req.headers.host,
                 mcpSessionId: readSessionHeader(req),
                 durationMs: Math.round(Number(process.hrtime.bigint() - startedAt) / 1e6),
             });
@@ -62,6 +64,18 @@ function createApp(sessions: Map<string, McpSession>): Express {
 
         next();
     });
+
+    app.use(express.json());
+
+    // `ALLOWED_HOSTS=*` turns the guard off entirely. Ephemeral tunnels hand out
+    // a new hostname on every restart, which makes an allowlist unmaintainable.
+    // The trade-off: any site open in the developer's browser can then reach
+    // this server on localhost, so keep it to local development.
+    if (config.ALLOWED_HOSTS.includes('*')) {
+        logger.warn('host header validation disabled', { allowedHosts: '*' });
+    } else {
+        app.use(hostHeaderValidation([...LOCALHOST_HOSTNAMES, ...config.ALLOWED_HOSTS]));
+    }
 
     app.get('/health', (_req, res) => {
         res.json({

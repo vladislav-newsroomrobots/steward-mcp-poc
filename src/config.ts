@@ -1,9 +1,15 @@
+import { join } from 'node:path';
+
 import { z } from 'zod';
 
-// Node loads .env natively; a missing file is not an error for us because every
-// setting below has a usable default (see .env.example).
+import { PROJECT_ROOT } from './paths.js';
+
+// Loaded from the package root rather than the working directory: bare
+// `loadEnvFile()` resolves against cwd, so starting the server from anywhere
+// else would silently ignore .env. A missing file is fine — every setting below
+// has a usable default (see .env.example).
 try {
-    process.loadEnvFile();
+    process.loadEnvFile(join(PROJECT_ROOT, '.env'));
 } catch {
     // no .env present — fall back to real environment variables
 }

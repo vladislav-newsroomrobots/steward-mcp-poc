@@ -1,8 +1,9 @@
 /**
- * Stage 0 acceptance check.
+ * Acceptance check for the current stage.
  *
- * Starts the built server on its own port, exercises /health, the Streamable
- * HTTP MCP handshake, the session error paths, and graceful shutdown.
+ * Starts the built server on its own port and exercises /health, the Streamable
+ * HTTP MCP handshake, the registered tools and MCP Apps resource, the session
+ * error paths, and graceful shutdown.
  *
  *   npm run build && npm run smoke
  */
@@ -48,8 +49,31 @@ try {
     check('tools/list is discoverable', Array.isArray(tools), tools);
     check('ping is advertised', tools.some(tool => tool.name === 'ping'), tools.map(tool => tool.name));
 
+    check('open_steward is advertised', tools.some(tool => tool.name === 'open_steward'), tools.map(tool => tool.name));
+
+    const openSteward = tools.find(tool => tool.name === 'open_steward');
+    const uiMeta = openSteward?._meta?.ui;
+    check('open_steward points at the UI resource', uiMeta?.resourceUri === 'ui://steward/app.html', openSteward?._meta);
+
     const pong = await client.callTool({ name: 'ping', arguments: {} });
     check('ping returns pong', pong.structuredContent?.message === 'pong', pong.structuredContent);
+
+    const opened = await client.callTool({ name: 'open_steward', arguments: { funderId: 'acme' } });
+    check('open_steward echoes funderId', opened.structuredContent?.funderId === 'acme', opened.structuredContent);
+
+    console.log('\nMCP Apps resource');
+    const { resources } = await client.listResources();
+    check(
+        'app resource is listed',
+        resources.some(resource => resource.uri === 'ui://steward/app.html'),
+        resources.map(resource => resource.uri),
+    );
+
+    const widget = await client.readResource({ uri: 'ui://steward/app.html' });
+    const doc = widget.contents[0];
+    check('resource uses the MCP Apps mime type', doc?.mimeType === 'text/html;profile=mcp-app', doc?.mimeType);
+    check('widget html is self-contained', typeof doc?.text === 'string' && doc.text.includes('<script type="module">'));
+    check('widget has no external src', typeof doc?.text === 'string' && !/<script[^>]+src=/.test(doc.text));
 
     console.log('\nSession error paths');
     const headers = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
@@ -83,5 +107,5 @@ try {
     await server.close().catch(() => {});
 }
 
-console.log(failures === 0 ? '\nStage 0 smoke: OK\n' : `\nStage 0 smoke: ${failures} failure(s)\n`);
+console.log(failures === 0 ? '\nSmoke: OK\n' : `\nSmoke: ${failures} failure(s)\n`);
 process.exit(failures === 0 ? 0 : 1);
