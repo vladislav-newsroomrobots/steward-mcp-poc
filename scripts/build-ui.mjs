@@ -42,7 +42,16 @@ if (!template.includes(placeholder)) {
 
 // A literal `</script>` anywhere in the bundle would close the tag early.
 const script = output.text.replaceAll('</script', '<\\/script');
-const html = template.replace(placeholder, `<script type="module">\n${script}\n</script>`);
+
+// The replacement MUST be a function. With a string, `$&`, `$'` and friends in
+// the bundle are treated as substitution patterns and silently rewritten — zod
+// ships `replace(..., "\\$&")`, which would become `"\\<!--APP_SCRIPT-->"` and
+// corrupt every schema built on it.
+const html = template.replace(placeholder, () => `<script type="module">\n${script}\n</script>`);
+
+if (html.includes(placeholder)) {
+    throw new Error(`${placeholder} leaked into the bundle — the script injection corrupted the output`);
+}
 
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, html, 'utf8');

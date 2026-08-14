@@ -74,6 +74,97 @@ try {
     check('resource uses the MCP Apps mime type', doc?.mimeType === 'text/html;profile=mcp-app', doc?.mimeType);
     check('widget html is self-contained', typeof doc?.text === 'string' && doc.text.includes('<script type="module">'));
     check('widget has no external src', typeof doc?.text === 'string' && !/<script[^>]+src=/.test(doc.text));
+    // `$&` and "$`" in the bundle are substitution patterns for String.replace.
+    // Injecting the script with a string replacement silently splices the
+    // surrounding HTML into the JavaScript and breaks the whole widget.
+    check('script injection did not corrupt the bundle', !doc?.text?.includes('APP_SCRIPT'));
+    check(
+        'stylesheet appears exactly once',
+        (doc?.text?.split('color-scheme: light dark').length ?? 0) - 1 === 1,
+        (doc?.text?.split('color-scheme: light dark').length ?? 0) - 1,
+    );
+
+    console.log('\nTool visibility');
+    const visibility = Object.fromEntries(tools.map(tool => [tool.name, tool._meta?.ui?.visibility]));
+    check('render_draft is model-only', JSON.stringify(visibility.render_draft) === '["model"]', visibility.render_draft);
+    check('get_session is app-only', JSON.stringify(visibility.get_session) === '["app"]', visibility.get_session);
+    check('create_session is app-only', JSON.stringify(visibility.create_session) === '["app"]', visibility.create_session);
+
+    console.log('\nGeneration cycle');
+    const inputs = {
+        documentType: 'Thank-you letter',
+        funder: 'Acme Foundation',
+        userRequest: 'Mention the education programme.',
+        wordLimit: 300,
+    };
+
+    const session = await client.callTool({ name: 'create_session', arguments: inputs });
+    const generationSessionId = session.structuredContent?.sessionId;
+    check('create_session returns an id', typeof generationSessionId === 'string', session.structuredContent);
+
+    const brief = await client.callTool({
+        name: 'request_generation',
+        arguments: { sessionId: generationSessionId, ...inputs, variant: 'ui-tool-call' },
+    });
+    const generationBrief = brief.structuredContent?.generationBrief;
+    check('request_generation returns a brief', generationBrief?.funder === 'Acme Foundation', generationBrief);
+    check('brief carries the word limit', generationBrief?.wordLimit === 300, generationBrief?.wordLimit);
+    check('first brief has no existing draft', generationBrief?.existingDraft === undefined);
+    check(
+        'result tells the model to continue',
+        typeof brief.structuredContent?.nextStep === 'string' && brief.structuredContent.nextStep.includes('render_draft'),
+    );
+
+    const generating = await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } });
+    check('session is generating', generating.structuredContent?.status === 'generating', generating.structuredContent);
+
+    const draftText = 'Dear Acme Foundation, thank you for supporting our education programme.';
+    await client.callTool({ name: 'render_draft', arguments: { sessionId: generationSessionId, text: draftText } });
+
+    const ready = await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } });
+    check('session is ready', ready.structuredContent?.status === 'ready', ready.structuredContent);
+    check('draft is stored', ready.structuredContent?.latestDraft === draftText);
+    check('one version exists', ready.structuredContent?.versionCount === 1, ready.structuredContent?.versionCount);
+
+    console.log('\nRefinement');
+    const refine = await client.callTool({
+        name: 'request_generation',
+        arguments: { sessionId: generationSessionId, userRequest: 'Make it warmer.' },
+    });
+    check(
+        'refinement brief includes the current draft',
+        refine.structuredContent?.generationBrief?.existingDraft === draftText,
+        refine.structuredContent?.generationBrief?.existingDraft,
+    );
+    check(
+        'omitted fields fall back to the session',
+        refine.structuredContent?.generationBrief?.funder === 'Acme Foundation',
+    );
+
+    await client.callTool({
+        name: 'render_draft',
+        arguments: { sessionId: generationSessionId, text: `${draftText} We are grateful.` },
+    });
+    const refined = await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } });
+    check('two versions exist', refined.structuredContent?.versionCount === 2, refined.structuredContent?.versionCount);
+
+    console.log('\nGeneration errors');
+    const unknownSessionCall = await client.callTool({
+        name: 'request_generation',
+        arguments: { sessionId: 'does-not-exist' },
+    });
+    check('unknown session is an MCP error', unknownSessionCall.isError === true, unknownSessionCall.isError);
+
+    console.log('\nSpike metrics');
+    const stats = await (await fetch(`${baseUrl}/stats`)).json();
+    check('two attempts recorded', stats.overall.attempts === 2, stats.overall);
+    check('both rendered', stats.overall.rendered === 2, stats.overall);
+    check('success rate is 1', stats.overall.successRate === 1, stats.overall.successRate);
+    check('variant is attributed', stats.byVariant['ui-tool-call'].attempts === 1, stats.byVariant);
+    check('refinement is flagged', stats.runs.some(run => run.isRefinement === true));
+
+    const statsText = await (await fetch(`${baseUrl}/stats?format=text`)).text();
+    check('text report renders', statsText.includes('Stage 2 — generation orchestration'));
 
     console.log('\nSession error paths');
     const headers = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };

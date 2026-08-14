@@ -11,10 +11,13 @@
                 --fg: #16181d;
                 --muted: #5f6673;
                 --border: #dfe3ea;
+                --field: #ffffff;
                 --accent: #2f5bea;
                 --accent-fg: #ffffff;
                 --ok-bg: #e8f5ec;
                 --ok-fg: #1c6b3a;
+                --warn-bg: #fdf3e3;
+                --warn-fg: #8a5a12;
                 --err-bg: #fdeaea;
                 --err-fg: #97231f;
                 --code-bg: #f4f6f9;
@@ -26,10 +29,13 @@
                     --fg: #eceef2;
                     --muted: #a0a7b4;
                     --border: #333845;
+                    --field: #242833;
                     --accent: #6b8dff;
                     --accent-fg: #12141a;
                     --ok-bg: #16301f;
                     --ok-fg: #7fd6a0;
+                    --warn-bg: #33280f;
+                    --warn-fg: #e8c07a;
                     --err-bg: #3a1d1c;
                     --err-fg: #ff9d97;
                     --code-bg: #242833;
@@ -52,17 +58,24 @@
                 border: 1px solid var(--border);
                 border-radius: 10px;
                 padding: 16px;
-                max-width: 480px;
+                max-width: 560px;
+            }
+
+            header {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                flex-wrap: wrap;
+                margin-bottom: 12px;
             }
 
             h1 {
-                margin: 0 0 4px;
+                margin: 0;
                 font-size: 18px;
+                flex: 1;
             }
 
-            .status {
-                display: inline-block;
-                margin: 8px 0 12px;
+            .badge {
                 padding: 3px 10px;
                 border-radius: 999px;
                 font-size: 12px;
@@ -71,30 +84,75 @@
                 color: var(--muted);
             }
 
-            .status[data-state='ready'] {
+            .badge[data-state='ready'],
+            .badge[data-state='connected'] {
                 background: var(--ok-bg);
                 color: var(--ok-fg);
             }
 
-            .status[data-state='error'] {
+            .badge[data-state='generating'] {
+                background: var(--warn-bg);
+                color: var(--warn-fg);
+            }
+
+            .badge[data-state='error'],
+            .badge[data-state='failed'] {
                 background: var(--err-bg);
                 color: var(--err-fg);
             }
 
-            dl {
-                margin: 0 0 12px;
-                display: grid;
-                grid-template-columns: auto 1fr;
-                gap: 2px 12px;
-                font-size: 13px;
+            fieldset {
+                border: 0;
+                margin: 0;
+                padding: 0;
             }
 
-            dt {
+            fieldset:disabled {
+                opacity: 0.6;
+            }
+
+            label {
+                display: block;
+                margin-bottom: 10px;
+                font-size: 12px;
+                font-weight: 600;
                 color: var(--muted);
             }
 
-            dd {
-                margin: 0;
+            input,
+            textarea,
+            select {
+                display: block;
+                width: 100%;
+                margin-top: 4px;
+                padding: 7px 9px;
+                border: 1px solid var(--border);
+                border-radius: 7px;
+                background: var(--field);
+                color: var(--fg);
+                font: inherit;
+                font-weight: 400;
+            }
+
+            textarea {
+                min-height: 64px;
+                resize: vertical;
+            }
+
+            .row {
+                display: flex;
+                gap: 12px;
+            }
+
+            .row > * {
+                flex: 1;
+            }
+
+            .actions {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-top: 4px;
             }
 
             button {
@@ -109,33 +167,89 @@
                 cursor: pointer;
             }
 
+            button.secondary {
+                background: var(--code-bg);
+                color: var(--muted);
+            }
+
             button:disabled {
                 opacity: 0.5;
                 cursor: default;
             }
 
-            pre {
-                margin: 12px 0 0;
-                padding: 10px;
-                border-radius: 8px;
-                background: var(--code-bg);
-                font-size: 12px;
-                white-space: pre-wrap;
-                word-break: break-word;
+            hr {
+                border: 0;
+                border-top: 1px solid var(--border);
+                margin: 16px 0;
             }
 
-            pre:empty {
-                display: none;
+            .draft {
+                white-space: pre-wrap;
+                word-break: break-word;
+                padding: 12px;
+                border-radius: 8px;
+                background: var(--code-bg);
+                min-height: 40px;
+            }
+
+            .meta {
+                margin-top: 8px;
+                font-size: 12px;
+                color: var(--muted);
             }
         </style>
     </head>
     <body>
         <div class="card">
-            <h1>Steward</h1>
-            <span class="status" id="status" data-state="connecting">Connecting…</span>
-            <dl id="host-info"></dl>
-            <button id="ping" type="button" disabled>Ping server</button>
-            <pre id="output"></pre>
+            <header>
+                <h1>Steward</h1>
+                <span class="badge" id="status" data-state="connecting">Connecting…</span>
+            </header>
+
+            <!-- Inputs are never gated on the host handshake: a broken script
+                 must not look like dead HTML. Only the actions are. -->
+            <fieldset id="form">
+                <div class="row">
+                    <label
+                        >Document type
+                        <input id="documentType" type="text" value="Thank-you letter" />
+                    </label>
+                    <label
+                        >Funder
+                        <input id="funder" type="text" value="Acme Foundation" />
+                    </label>
+                </div>
+
+                <label
+                    >Request
+                    <textarea id="userRequest" placeholder="Mention the education programme and the site visit in March."></textarea>
+                </label>
+
+                <div class="row">
+                    <label
+                        >Word limit
+                        <input id="wordLimit" type="number" min="50" max="2000" step="50" value="300" />
+                    </label>
+                    <label
+                        >Orchestration
+                        <select id="variant">
+                            <option value="conversation">B — conversation continuation</option>
+                            <option value="ui-tool-call">A — UI tool call</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="actions">
+                    <button id="generate" type="button" disabled>Generate</button>
+                    <button id="reset" class="secondary" type="button" disabled>New session</button>
+                    <button id="ping" class="secondary" type="button" disabled>Ping</button>
+                </div>
+            </fieldset>
+
+            <hr />
+
+            <div class="draft" id="draft">No draft yet.</div>
+            <div class="meta" id="meta"></div>
         </div>
         <!--APP_SCRIPT-->
     </body>

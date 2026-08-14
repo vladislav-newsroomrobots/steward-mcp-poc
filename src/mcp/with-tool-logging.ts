@@ -1,3 +1,4 @@
+import { StewardError } from '../errors.js';
 import { describeError, logger } from '../logger.js';
 
 /**
@@ -28,7 +29,19 @@ export function withToolLogging<Args extends unknown[], Result>(
             log.info('tool finished', { durationMs: elapsedMs() });
             return result;
         } catch (error) {
-            log.error('tool failed', { durationMs: elapsedMs(), ...describeError(error) });
+            // A StewardError is a modelled outcome — a bad session id, a missing
+            // field. Logging those at error level with a stack buries the real
+            // failures during a spike run.
+            if (error instanceof StewardError) {
+                log.warn('tool rejected', {
+                    durationMs: elapsedMs(),
+                    code: error.code,
+                    errorMessage: error.message,
+                });
+            } else {
+                log.error('tool failed', { durationMs: elapsedMs(), ...describeError(error) });
+            }
+
             throw error;
         }
     };

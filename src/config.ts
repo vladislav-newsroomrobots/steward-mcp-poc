@@ -25,6 +25,9 @@ const configSchema = z.object({
     // Extra Host header values accepted by the DNS-rebinding guard. The tunnel
     // hostname goes here once stage 1 wires up the ChatGPT connection.
     ALLOWED_HOSTS: csv.default(''),
+    // How long a generation may stay open before it counts as failed. Read
+    // lazily by the session store and the run log, never as a timer.
+    GENERATION_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
     DEMO_MODE: z
         .enum(['true', 'false'])

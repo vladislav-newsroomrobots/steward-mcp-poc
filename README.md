@@ -34,6 +34,7 @@ cp .env.example .env   # optional, every value has a default
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | liveness + session count |
+| `GET /stats` | generation reliability metrics; `?format=text` for a report |
 | `POST /mcp` | MCP messages; a request without a session ID must be `initialize` |
 | `GET /mcp` | server → client SSE stream for an open session |
 | `DELETE /mcp` | terminates a session |
@@ -48,6 +49,7 @@ leaks between conversations.
 | `PORT` | `3000` | listen port |
 | `HOST` | `127.0.0.1` | bind address |
 | `ALLOWED_HOSTS` | — | extra `Host` values for the DNS-rebinding guard, comma separated; `*` disables the check (see below) |
+| `GENERATION_TIMEOUT_MS` | `120000` | how long a generation may stay open before it counts as failed |
 | `LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
 | `DEMO_MODE` | `false` | forces fallback drafts once generation exists (stage 5+) |
 
@@ -196,11 +198,63 @@ itself needs no change.
 
 ## Tools and resources
 
-| Name | Kind | Purpose |
+| Name | Visible to | Purpose |
 |---|---|---|
-| `open_steward` | tool | entry point; renders `ui://steward/app.html` in the conversation |
-| `ping` | tool | connectivity probe, no Steward logic |
-| `ui://steward/app.html` | resource | the single-file MCP Apps widget |
+| `open_steward` | model, app | entry point; renders `ui://steward/app.html` in the conversation |
+| `request_generation` | model, app | returns the generation brief the model writes from |
+| `render_draft` | model | stores the document the model wrote and shows it in the panel |
+| `create_session` | app | opens a drafting session |
+| `get_session` | app | session state, polled by the widget while generating |
+| `ping` | model, app | connectivity probe, no Steward logic |
+| `ui://steward/app.html` | — | resource: the single-file MCP Apps widget |
+
+Visibility comes from `_meta.ui.visibility`. Session plumbing is hidden from the
+model so it cannot wander into it, and `render_draft` is hidden from the widget
+because only the model produces drafts.
+
+## The generation cycle
+
+The server never calls an LLM. It hands the host model a brief and takes back a
+finished document:
+
+```text
+Generate (widget)
+   → request_generation   returns the brief
+   → the model writes the document
+   → render_draft         stores it, panel updates
+```
+
+`render_draft` is a separate call from the model to the server, so the widget is
+never told directly that a draft landed — it polls `get_session` while the
+status is `generating`.
+
+Two orchestration variants are implemented, switchable in the widget:
+
+| Variant | How it starts | Trade-off |
+|---|---|---|
+| A — UI tool call | the widget calls `request_generation` itself | fewest moving parts, but the model must notice the tool result and continue unprompted |
+| B — conversation | the widget sends a follow-up message via `ui/message` | the model drives the whole cycle, which is the path hosts are tuned for |
+
+A generation that never reaches `render_draft` is failed after
+`GENERATION_TIMEOUT_MS`. That deadline is evaluated when the session is read
+rather than by a timer, so nothing leaks and nothing can sit in `generating`
+forever.
+
+### Measuring reliability
+
+Every attempt is recorded. `GET /stats` returns JSON;
+`GET /stats?format=text` prints a report:
+
+```text
+Stage 2 — generation orchestration
+
+overall           20 attempts   19 rendered    1 timed out    0 pending    95.0%  12.4s avg
+variant A (ui)    10 attempts    8 rendered    2 timed out    0 pending    80.0%  11.8s avg
+variant B (chat)  10 attempts   10 rendered    0 timed out    0 pending   100.0%  13.0s avg
+```
+
+The stage 2 target is ≥90% during the spike and ≥95% after tuning. Counters live
+in memory and reset with the process, so finish a matrix in one run.
 
 ## Layout
 
@@ -240,15 +294,37 @@ directly by the iframe.
 Stage 4 may swap esbuild for Vite + React; the output contract — a single
 `ui/dist/app.html` — stays the same.
 
-## Current state — stage 1
+## Current state — stage 2
 
-`open_steward` renders the widget, which connects to the host, shows host name,
-theme and locale, and calls `ping` through the host on demand. There is no
-Steward data or generation yet: fixtures arrive in stage 3, the generation tools
-in stage 2.
+The full `request_generation → model writes → render_draft` cycle works, with
+refinement, both orchestration variants and reliability metrics. Data is still
+free text typed into the widget; fixtures, document-type tips and funder/deal
+pickers arrive in stage 3, and the real interface in stage 4.
 
-Verifying the iframe itself requires a real host — the smoke check can only
-confirm the resource is served, self-contained and correctly typed.
+The widget is a spike harness on purpose — plain fields and a variant switch,
+enough to run the matrix and watch the cycle complete.
+
+`npm run smoke` exercises the whole cycle server-side, standing in for the model.
+What it cannot check is whether a real host actually completes the cycle — that
+is what the matrix below is for.
+
+### Running the reliability matrix
+
+Restart the server first so the counters start clean, then, from ChatGPT, run
+the documented spread per variant:
+
+| Case | Runs |
+|---|---:|
+| thank-you letters | 5 |
+| grant reports | 5 |
+| vague requests | 5 |
+| refinements | 5 |
+
+Read the result with:
+
+```bash
+curl "http://localhost:3000/stats?format=text"
+```
 
 ### Checking it by hand
 
