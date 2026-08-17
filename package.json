@@ -10,6 +10,7 @@
     "build": "npm run build:ui && tsc -p tsconfig.json",
     "build:ui": "node scripts/build-ui.mjs",
     "start": "node dist/index.js",
+    "start:stdio": "node dist/stdio.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p ui/tsconfig.json",
     "smoke": "node scripts/smoke.mjs",
     "tunnel": "cloudflared tunnel --protocol http2 --url http://localhost:3000"

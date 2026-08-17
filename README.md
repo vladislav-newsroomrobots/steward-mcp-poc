@@ -24,7 +24,8 @@ cp .env.example .env   # optional, every value has a default
 | `npm run dev` | builds the widget, then starts the server with reload on change |
 | `npm run build` | builds the widget and compiles TypeScript to `dist/` |
 | `npm run build:ui` | rebuilds only the widget (the server re-reads it per request) |
-| `npm run start` | runs the compiled server |
+| `npm run start` | runs the compiled server over HTTP |
+| `npm run start:stdio` | runs it over stdio, for hosts that launch it themselves |
 | `npm run typecheck` | type checks the server and the widget |
 | `npm run smoke` | acceptance check for the current stage (run `npm run build` first) |
 | `npm run tunnel` | opens a Cloudflare Quick Tunnel to the local server |
@@ -76,6 +77,43 @@ logs a warning at startup whenever it runs that way.
 
 Configuration is read once at startup, so restart the server after changing
 `.env` — `tsx watch` follows `src/`, not the environment.
+
+## Connecting to Claude Desktop
+
+Claude Desktop launches the server itself and reaches it directly, so there is
+no tunnel, no hostname to allow and nothing public. It is the quickest way to
+get the panel running locally.
+
+```bash
+npm run build
+which node          # Claude Desktop does not inherit your shell PATH
+```
+
+Then add the server to `claude_desktop_config.json` — on macOS at
+`~/Library/Application Support/Claude/claude_desktop_config.json`, on Windows at
+`%APPDATA%\Claude\claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "steward": {
+      "command": "/absolute/path/to/node",
+      "args": ["/absolute/path/to/steward-mcp-poc/dist/stdio.js"]
+    }
+  }
+}
+```
+
+Both paths must be absolute. A GUI app on macOS does not see the PATH your
+terminal does, so a bare `"node"` fails silently when node came from nvm or
+Homebrew — use the output of `which node`.
+
+Restart Claude Desktop, then ask it to open Steward.
+
+Two differences from the HTTP setup worth knowing: rebuilding requires
+restarting Claude Desktop, since it owns the process; and `/stats` is not
+available, because nothing is listening on HTTP. Use the ChatGPT setup below
+when running the reliability matrix.
 
 ## Connecting to ChatGPT
 
