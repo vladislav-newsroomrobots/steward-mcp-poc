@@ -38,6 +38,13 @@ export function withToolLogging<Args extends unknown[], Result>(
                     code: error.code,
                     errorMessage: error.message,
                 });
+
+                // The SDK turns a thrown error into an `isError` result carrying
+                // only the message, so the code travels in it. Both callers need
+                // it: the widget reacts differently to FEEDBACK_ALREADY_GIVEN
+                // than to a real failure, and the model is told in the server
+                // instructions which codes not to retry.
+                throw new Error(`[${error.code}] ${error.message}`, { cause: error });
             } else {
                 log.error('tool failed', { durationMs: elapsedMs(), ...describeError(error) });
             }

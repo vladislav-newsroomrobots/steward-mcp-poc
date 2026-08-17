@@ -26,8 +26,8 @@ interface RequestGenerationInput extends Partial<SessionInputs> {
  */
 const CONTINUATION_INSTRUCTION = [
     'Do not stop here, and do not describe this brief back to the user.',
-    'Write the complete document now, following the instructions and word limit above,',
-    'then call render_draft with the full text and the same sessionId.',
+    'Write the complete document now, following the instructions, word limit and format above,',
+    'then call render_draft with the full document and the same sessionId.',
     'Send the document through render_draft rather than writing it into the chat;',
     'the user reads it in the Steward panel. Keep your chat reply to one short sentence.',
 ].join(' ');
@@ -107,7 +107,7 @@ export function registerRequestGenerationTool(server: McpServer): void {
             const funder = workspace.funder(inputs.funderId);
             const deal = inputs.dealId === undefined ? undefined : workspace.deal(inputs.dealId);
 
-            const existingDraft = session.versions.at(-1)?.text;
+            const existingDraft = session.versions.at(-1)?.html;
 
             const generationBrief = buildGenerationBrief({
                 documentType,

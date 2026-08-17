@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steward MCP — Product Walkthrough</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        /* ══ Steward extension design tokens (src/constants/colors.ts + GlobalStyle.ts) ══ */
+        :root{
+            --primary-50:#F0F1FF; --primary-100:#DEE5FF; --primary-500:#2434F3; --primary-600:#1e28d9;
+            --indigo:#6366F1; --indigo-h:#4F46E5; --indigo-soft:#EEF2FF; --indigo-soft2:#E0E7FF; --indigo-text:#4338CA;
+            --gray-50:#F9FAFB; --gray-100:#F3F4F6; --gray-200:#E5E7EB; --gray-300:#D1D5DB; --gray-400:#9CA3AF;
+            --gray-500:#6B7280; --gray-600:#4B5563; --gray-700:#374151; --gray-800:#1F2937; --gray-900:#111827;
+            --txt:#1B1B1B; --txt-2:#667085; --txt-3:#98A2B3;
+            --bord-l:#EAECF0; --bord:#D1D5DB;
+            --err:#B42318; --err-50:#FEF2F2; --ok-50:#F0FDF4; --ok:#16A34A; --warn-50:#FFFAEB; --warn:#B54708;
+            --body:'DM Sans',-apple-system,'Segoe UI',sans-serif;
+            --btnf:'Inter',-apple-system,'Segoe UI',sans-serif;
+            --head:'Times New Roman',Georgia,serif;
+        }
+        *{box-sizing:border-box;margin:0;}
+        html{scroll-behavior:smooth;}
+        body{background:#EDEDEA;color:var(--txt);font:14.5px/1.6 var(--body);}
+        a{color:var(--indigo-text);text-decoration:none;} a:hover{text-decoration:underline;}
+        code{font-family:ui-monospace,Menlo,monospace;font-size:.85em;background:var(--gray-100);padding:1px 5px;border-radius:4px;color:var(--gray-700);}
+
+        .wrap{max-width:1140px;margin:0 auto;padding:0 26px;}
+
+        header.hero{background:#fff;border-bottom:1px solid var(--bord-l);padding:56px 0 40px;}
+        .kicker{font:600 11px var(--btnf);letter-spacing:.14em;text-transform:uppercase;color:var(--primary-500);margin-bottom:14px;}
+        h1{font-family:var(--head);font-weight:700;font-size:clamp(30px,4.2vw,44px);line-height:1.12;max-width:22ch;}
+        .lede{max-width:66ch;color:var(--txt-2);margin-top:14px;font-size:16px;}
+        .legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:24px;font-size:13px;color:var(--txt-2);}
+        .legend span{display:inline-flex;align-items:center;gap:7px;}
+        .dot{width:10px;height:10px;border-radius:3px;display:inline-block;}
+        .try{display:inline-block;font:600 10px var(--btnf);letter-spacing:.06em;text-transform:uppercase;background:var(--primary-500);color:#fff;border-radius:4px;padding:3px 8px;vertical-align:2px;margin-left:8px;}
+
+        .layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:44px;padding:40px 0 90px;}
+        nav.toc{position:sticky;top:22px;align-self:start;font-size:13px;}
+        nav.toc .toc-h{font:600 10.5px var(--btnf);letter-spacing:.12em;text-transform:uppercase;color:var(--txt-3);margin:14px 0 8px;}
+        nav.toc .toc-h:first-child{margin-top:0;}
+        nav.toc a{display:block;color:var(--txt-2);padding:3px 0 3px 12px;border-left:2px solid var(--bord-l);}
+        nav.toc a:hover{color:var(--primary-500);border-color:var(--primary-500);text-decoration:none;}
+
+        section.block{margin-bottom:58px;}
+        .block-h{display:flex;align-items:baseline;gap:14px;border-bottom:2px solid var(--txt);padding-bottom:9px;margin-bottom:8px;}
+        .block-h .idx{font:600 12px var(--btnf);color:var(--primary-500);letter-spacing:.08em;text-transform:uppercase;}
+        .block-h h2{font-family:var(--head);font-weight:700;font-size:25px;}
+        .block-note{color:var(--txt-2);font-size:14px;max-width:72ch;margin-bottom:24px;}
+
+        article.case{margin-bottom:40px;}
+        .case h3{font:500 17px var(--btnf);margin-bottom:4px;color:var(--gray-800);}
+        .case h3 .cid{font:600 11px var(--btnf);color:var(--primary-500);background:var(--primary-50);border-radius:4px;padding:2px 7px;vertical-align:2px;margin-right:8px;letter-spacing:.05em;}
+        .case p.sc{color:var(--txt-2);font-size:13.5px;max-width:74ch;margin-bottom:12px;}
+
+        /* chat frame */
+        .chat{background:var(--gray-50);border:1px solid var(--bord-l);border-radius:16px;padding:20px 22px 16px;max-width:780px;}
+        .who{font:500 10px var(--btnf);letter-spacing:.1em;text-transform:uppercase;color:var(--txt-3);margin:0 0 5px 2px;}
+        .msg{margin-bottom:15px;} .msg:last-child{margin-bottom:0;}
+        .msg.user .bubble{background:var(--primary-100);border-radius:12px 12px 12px 4px;padding:10px 14px;display:inline-block;max-width:58ch;font-size:14px;}
+        .msg.ai .bubble{font-size:14px;max-width:68ch;}
+        .tool{display:inline-flex;align-items:center;gap:8px;font:12px var(--btnf);background:#fff;border:1px solid var(--bord-l);border-radius:8px;padding:6px 11px;color:var(--txt-2);margin:2px 6px 4px 0;}
+        .tool .tk{color:var(--ok);font-weight:600;}
+        .tool.err .tk{color:var(--err);}
+
+        /* widget shell */
+        .widget{background:#fff;border:1px solid var(--bord-l);border-radius:12px;padding:14px 16px;margin-top:6px;max-width:700px;}
+        .w-head{display:flex;justify-content:space-between;align-items:center;font:11px var(--btnf);color:var(--txt-3);margin-bottom:10px;flex-wrap:wrap;gap:6px;}
+        .w-title{font:500 13px var(--btnf);color:var(--gray-700);margin:0 0 8px;}
+        .pill{display:inline-block;border:1px solid var(--bord);border-radius:999px;padding:4px 13px;margin:3px 5px 3px 0;font-size:13px;background:#fff;color:var(--gray-600);cursor:pointer;user-select:none;transition:all .12s;}
+        .pill:hover{border-color:var(--gray-400);background:var(--gray-100);}
+        .pill.sel{background:var(--primary-500);border-color:var(--primary-500);color:#fff;}
+        .pill.static{cursor:default;}
+        .pill .sub-l{opacity:.75;font-size:11px;margin-left:6px;}
+        input[type=search]{width:100%;padding:8px 11px;border:1px solid var(--bord);border-radius:6px;font:13px var(--body);color:var(--gray-800);outline:none;margin-bottom:8px;}
+        input[type=search]:focus{border-color:var(--indigo);box-shadow:0 0 0 3px var(--indigo-soft);}
+        .btn{font:500 13px var(--btnf);border-radius:6px;padding:7px 14px;cursor:pointer;transition:all .12s;border:1px solid var(--bord);background:#fff;color:var(--gray-600);}
+        .btn:hover{background:var(--gray-100);}
+        .btn.primary{background:var(--indigo);border-color:var(--indigo);color:#fff;}
+        .btn.primary:hover{background:var(--indigo-h);}
+        .btn.brand{background:var(--primary-500);border-color:var(--primary-500);color:#fff;}
+        .btn.brand:hover{background:var(--prim-600,#1e28d9);}
+        .btn.icon{padding:6px 10px;font-size:14px;line-height:1;}
+        .btn:disabled{opacity:.45;cursor:default;}
+        .w-bar{display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;}
+        .w-meta{font-size:11.5px;color:var(--txt-3);}
+        .grow{flex:1;}
+
+        /* draft rendering (canonical-html-v1) */
+        .draft{border:1px solid var(--bord-l);border-radius:10px;padding:16px 18px;font-size:14px;line-height:1.65;background:#fff;min-height:56px;}
+        .draft p{margin:0 0 10px;} .draft p:last-child{margin-bottom:0;}
+        .draft blockquote{border-left:3px solid var(--gray-300);color:var(--gray-600);font-style:italic;margin:0 0 10px;padding:4px 12px;background:var(--gray-50);}
+        .draft ul,.draft ol{margin:0 0 10px;padding-left:22px;}
+        .draft[contenteditable=true]{outline:none;border-color:var(--indigo);box-shadow:0 0 0 3px var(--indigo-soft);}
+        .hl{background:#FDF1D6;border-radius:3px;padding:0 3px;}
+
+        /* editor toolbar */
+        .toolbar{display:none;flex-wrap:wrap;align-items:center;gap:2px;border:1px solid var(--bord-l);border-bottom:none;border-radius:10px 10px 0 0;padding:6px 8px;background:#fff;}
+        .editing .toolbar{display:flex;}
+        .editing .draft{border-radius:0 0 10px 10px;}
+        .tb{width:30px;height:28px;border:none;border-radius:6px;background:transparent;color:var(--gray-600);font:500 13px var(--btnf);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:background .15s;}
+        .tb:hover{background:var(--gray-100);color:var(--gray-900);}
+        .tb.on{background:var(--indigo-soft);color:var(--indigo-text);}
+        .tb svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;}
+        .tb-sep{width:1px;height:18px;background:var(--gray-200);margin:0 5px;}
+
+        .vnav{display:inline-flex;align-items:center;gap:6px;font:500 12px var(--btnf);color:var(--txt-2);}
+        .vnav button{width:26px;height:26px;border:1px solid var(--bord);border-radius:6px;background:#fff;color:var(--gray-600);cursor:pointer;font-size:13px;line-height:1;}
+        .vnav button:hover:not(:disabled){background:var(--gray-100);}
+        .vnav button:disabled{opacity:.35;cursor:default;}
+        .vbadge{background:var(--gray-100);border-radius:6px;padding:3px 9px;}
+        .vbadge.edit{background:var(--indigo-soft);color:var(--indigo-text);}
+
+        .fb{display:none;border:1px solid var(--bord-l);border-radius:10px;padding:13px 15px;margin-top:10px;background:var(--gray-50);}
+        .fb.open{display:block;}
+        .fb-t{font:500 13px var(--btnf);color:var(--gray-700);margin-bottom:8px;}
+        .req{font:600 10px var(--btnf);background:var(--primary-100);color:var(--primary-500);border-radius:4px;padding:2px 6px;margin-left:6px;vertical-align:1px;}
+        .tag{display:inline-block;border:1px solid var(--bord);border-radius:8px;padding:6px 12px;margin:3px 6px 3px 0;font-size:12.5px;background:#fff;cursor:pointer;color:var(--gray-600);transition:all .12s;}
+        .tag:hover{border-color:var(--gray-400);}
+        .tag.sel{background:var(--indigo-soft);border-color:var(--indigo);color:var(--indigo-text);font-weight:500;}
+        .tag.static{cursor:default;}
+        .fb textarea{width:100%;border:1px solid var(--bord);border-radius:6px;padding:8px 10px;font:13px var(--body);resize:vertical;min-height:50px;margin-top:8px;outline:none;}
+        .fb textarea:focus{border-color:var(--indigo);}
+
+        .banner{display:flex;gap:9px;align-items:flex-start;border-radius:10px;padding:10px 14px;font-size:13px;margin-top:6px;max-width:660px;line-height:1.5;}
+        .banner.ok{background:var(--ok-50);color:#166534;}
+        .banner.warn{background:var(--warn-50);color:var(--warn);}
+        .banner.err{background:var(--err-50);color:var(--err);}
+
+        .doc-row{display:flex;align-items:center;justify-content:space-between;padding:9px 4px;border-bottom:1px solid var(--bord-l);font-size:13.5px;}
+        .doc-row:last-child{border-bottom:0;}
+        .doc-row .nm{display:flex;gap:9px;align-items:center;}
+        .ficon{font:600 10px var(--btnf);padding:2px 6px;border-radius:4px;background:var(--primary-50);color:var(--primary-500);}
+        .doc-act{display:flex;gap:6px;align-items:center;}
+        .link-btn{font:500 12px var(--btnf);color:var(--indigo-text);background:none;border:none;cursor:pointer;padding:3px 6px;border-radius:4px;}
+        .link-btn:hover{background:var(--indigo-soft);}
+        .link-btn.danger{color:var(--err);}
+        .link-btn.danger:hover{background:var(--err-50);}
+        .chk{font-size:12px;color:var(--ok);font-weight:600;}
+
+        .mini-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px;margin-top:6px;}
+        .mini{background:#fff;border:1px solid var(--bord-l);border-radius:10px;padding:11px 13px;font-size:12.5px;}
+        .mini .m-t{font:500 13px var(--btnf);margin-bottom:3px;color:var(--gray-800);}
+        .mini .m-s{color:var(--txt-3);font-size:11.5px;}
+
+        .flow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font:12px var(--btnf);color:var(--txt-2);margin:8px 0 2px;}
+        .fstep{border:1px solid var(--bord);border-radius:8px;padding:5px 10px;background:#fff;}
+        .fstep.g{background:var(--primary-50);border-color:var(--primary-100);color:var(--primary-500);font-weight:500;}
+        .arr{color:var(--txt-3);}
+
+        .term{background:var(--gray-900);color:#D6DAE0;border-radius:10px;padding:14px 16px;font:12.5px/1.6 ui-monospace,Menlo,monospace;max-width:660px;margin-top:6px;overflow-x:auto;}
+        .term .p{color:#7EE2A8;} .term .c{color:#8B93A2;}
+
+        .caption{font-size:12.5px;color:var(--txt-3);margin-top:9px;max-width:76ch;}
+        .caption b{color:var(--txt-2);font-weight:500;}
+
+        table.errs{width:100%;border-collapse:collapse;font-size:13px;max-width:780px;background:#fff;border:1px solid var(--bord-l);border-radius:12px;overflow:hidden;}
+        table.errs th{font:600 10.5px var(--btnf);text-transform:uppercase;letter-spacing:.08em;color:var(--txt-3);text-align:left;padding:10px 12px;border-bottom:2px solid var(--gray-200);background:var(--gray-50);}
+        table.errs td{padding:9px 12px;border-bottom:1px solid var(--bord-l);vertical-align:top;}
+        table.errs tr:last-child td{border-bottom:0;}
+
+        .two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:700px;margin-top:6px;}
+        @media(max-width:700px){.two-col{grid-template-columns:1fr;}}
+        .variant{background:#fff;border:1px solid var(--bord-l);border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.55;}
+        .variant .v-l{font:600 10.5px var(--btnf);letter-spacing:.06em;text-transform:uppercase;color:var(--primary-500);margin-bottom:6px;}
+
+        /* context suggestion cards */
+        .sg-sec{font:600 10.5px var(--btnf);letter-spacing:.08em;text-transform:uppercase;color:var(--txt-3);margin:12px 0 4px;}
+        .sug{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--bord);border-radius:10px;padding:10px 13px;margin:6px 0;background:#fff;cursor:pointer;transition:all .12s;}
+        .sug:hover{border-color:var(--indigo);background:var(--indigo-soft);}
+        .sug.sel{border-color:var(--primary-500);background:var(--primary-100);}
+        .sug .s-n{font:500 13.5px var(--btnf);color:var(--gray-800);}
+        .sug .s-r{display:flex;gap:5px;flex-wrap:wrap;margin-top:3px;}
+        .why{font:500 10.5px var(--btnf);background:var(--gray-100);color:var(--gray-600);border-radius:4px;padding:2px 7px;}
+        .why.hot{background:#FDF1D6;color:#92600A;}
+
+        #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);background:var(--gray-900);color:#fff;font:500 13px var(--btnf);border-radius:8px;padding:10px 18px;opacity:0;pointer-events:none;transition:all .25s;z-index:50;max-width:88vw;}
+        #toast.show{opacity:1;transform:translateX(-50%);}
+
+        footer{border-top:1px solid var(--bord-l);background:#fff;padding:24px 0 56px;font-size:13px;color:var(--txt-3);}
+
+        @media(max-width:880px){
+            .layout{grid-template-columns:1fr;}
+            nav.toc{position:static;display:flex;flex-wrap:wrap;gap:2px 16px;border-bottom:1px solid var(--bord-l);padding-bottom:14px;}
+            nav.toc a{border-left:0;padding:2px 0;}
+            nav.toc .toc-h{width:100%;}
+        }
+        @media(prefers-reduced-motion:reduce){*{transition:none!important;}}
+    </style>
+</head>
+<body>
+
+<header class="hero">
+    <div class="wrap">
+        <div class="kicker">Steward × Model Context Protocol · Product walkthrough</div>
+        <h1>Every Steward use case, as your users will experience it</h1>
+        <p class="lede">Steward's full writing-assistant functionality — today a Chrome extension — delivered as an MCP server that plugs into Claude and Codex. Below is the complete catalog of user scenarios. Panels marked <span class="try" style="vertical-align:0;">Try it</span> are live: click the buttons.</p>
+        <div class="legend">
+            <span><span class="dot" style="background:var(--primary-100);border:1px solid var(--bord);"></span> user message</span>
+            <span><span class="dot" style="background:#fff;border:1px solid var(--bord);"></span> MCP tool call</span>
+            <span><span class="dot" style="background:var(--primary-500);"></span> Steward widget (renders inline in Claude)</span>
+            <span><span class="dot" style="background:#FDF1D6;border:1px solid #EAD9A8;"></span> under-the-hood note</span>
+        </div>
+    </div>
+</header>
+
+<div class="wrap layout">
+
+    <nav class="toc" aria-label="Contents">
+        <div class="toc-h">Scenarios</div>
+        <a href="#a">A · Sign-in &amp; access</a>
+        <a href="#b">B · Workspace overview</a>
+        <a href="#c">C · Draft generation</a>
+        <a href="#d">D · Context documents</a>
+        <a href="#e">E · Versions &amp; feedback</a>
+        <a href="#f">F · Sessions</a>
+        <a href="#g">G · Beyond the extension</a>
+        <a href="#h">H · Errors &amp; limits</a>
+    </nav>
+
+    <main>
+
+        <!-- ═══════════════ A ═══════════════ -->
+        <section class="block" id="a">
+            <div class="block-h"><span class="idx">Block A</span><h2>Sign-in &amp; access</h2></div>
+            <p class="block-note">Same trust model as the extension: users sign in on the Steward platform, exchange a 60-second code for a 7-day session. Admins can skip the dialog entirely with environment variables.</p>
+
+            <article class="case">
+                <h3><span class="cid">A1</span>First sign-in</h3>
+                <p class="sc">A new user asks for a letter before connecting. Claude walks them through the one-time exchange.</p>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Write a renewal letter for the Knight Foundation</div></div>
+                    <div class="msg ai"><div class="who">Claude</div><div class="bubble">Let's connect your Steward account first. Open <a>tools.theajp.org</a>, sign in, and copy your connection code — it's valid for 60 seconds.</div></div>
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Code: eyJhbGciOiJIUzI1NiIs…</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_exchange_auth_code</span>
+                        <div class="banner ok">Signed in: maria@riversidechronicle.org · Riverside Chronicle · role journalist · session valid 7 days</div>
+                        <div class="bubble" style="margin-top:8px;">Connected. Now, about that letter — pulling your Knight Foundation context…</div>
+                    </div>
+                </div>
+                <p class="caption"><b>Under the hood:</b> the code comes from the platform's session-code endpoint under the user's Clerk session; the 7-day token is cached locally, so this happens at most once a week.</p>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">A2</span>Session expired</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Generate a funder update</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool err"><span class="tk">✕</span> steward_generate_draft · 401</span>
+                        <div class="banner warn">Your Steward session has expired (7-day lifetime). Grab a fresh code from the platform and I'll pick up right where we left off — your context is preserved.</div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">A3</span>Access revoked mid-work</h3>
+                <p class="sc">If an org admin removes a user, the backend rejects the next call with a specific code. Claude explains instead of retrying blindly.</p>
+                <div class="chat">
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool err"><span class="tk">✕</span> steward_generate_draft · 403 organization_access_denied</span>
+                        <div class="banner err">Your access to Riverside Chronicle's Steward workspace has been revoked. Please contact your organization admin — I won't retry until access is restored.</div>
+                    </div>
+                </div>
+                <p class="caption">Handled codes: <code>extension_access_revoked</code>, <code>insufficient_role</code>, <code>organization_access_denied</code>, <code>user_already_in_another_organization</code>.</p>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">A4</span>Zero-dialog setup for teams</h3>
+                <div class="term">
+                    <span class="c"># One-time admin setup — no sign-in dialog for end users</span>
+                    <span class="p">$</span> export STEWARD_ACCESS_TOKEN=…  STEWARD_ORG_ID=org_2ab…  STEWARD_API_BASE_URL=https://tools.theajp.org/api
+                    <span class="p">$</span> claude mcp add steward -- node /opt/steward-mcp/dist/index.js</div>
+            </article>
+        </section>
+
+        <!-- ═══════════════ B ═══════════════ -->
+        <section class="block" id="b">
+            <div class="block-h"><span class="idx">Block B</span><h2>Workspace overview</h2></div>
+            <p class="block-note">One call returns everything the user can work with: communication types (with writing tips), funders, opportunities, and any active session — rendered as an interactive picker.</p>
+
+            <article class="case">
+                <h3><span class="cid">B1</span>"What can I work with?" — workspace picker<span class="try">Try it</span></h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Show me what I can work with in Steward</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_get_workspace</span>
+                        <div class="widget" id="picker">
+                            <div class="w-head"><span>Steward · workspace picker</span><span id="pk-count"></span></div>
+                            <div class="w-title">Document type</div>
+                            <div id="pk-dt"></div>
+                            <div class="w-title" style="margin-top:12px;">Funders</div>
+                            <input type="search" id="pk-fq" placeholder="Search funders by name…" aria-label="Search funders">
+                            <div id="pk-f"></div>
+                            <div class="w-title" style="margin-top:12px;">Opportunities</div>
+                            <input type="search" id="pk-dq" placeholder="Search opportunities by name…" aria-label="Search opportunities">
+                            <div id="pk-d"></div>
+                            <div class="w-bar">
+                                <button class="btn brand" id="pk-use">Use this context ↗</button>
+                                <span class="w-meta">selection is sent back to the chat</span>
+                            </div>
+                        </div>
+                        <div class="msg user" id="pk-echo" style="display:none;margin-top:12px;">
+                            <div class="who">User (sent by the widget)</div><div class="bubble" id="pk-echo-text"></div>
+                        </div>
+                    </div>
+                </div>
+                <p class="caption"><b>Under the hood:</b> picker sections follow the selected document type's allowed entities; Airtable record IDs are replaced with human-readable names automatically.</p>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">B2</span>Resume yesterday's work</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Where did I leave off in Steward yesterday?</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_get_workspace</span>
+                        <div class="widget">
+                            <div class="w-head"><span>Active session</span><span>8f3a2c1d… · yesterday 5:42 pm</span></div>
+                            <div class="mini-cards">
+                                <div class="mini"><div class="m-t">Grant renewal letter</div><div class="m-s">Knight Foundation</div></div>
+                                <div class="mini"><div class="m-t">3 versions</div><div class="m-s">latest is your manual edit</div></div>
+                                <div class="mini"><div class="m-t">Timeline: 7 events</div><div class="m-s">2 generations · 1 edit · 1 👍</div></div>
+                            </div>
+                        </div>
+                        <div class="bubble" style="margin-top:8px;">Continue this session, or start fresh?</div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">B3</span>Explore funder relationships</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Which opportunities are linked to the Knight Foundation?</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_get_funder_opportunities</span>
+                        <div class="widget"><div class="mini-cards">
+                            <div class="mini"><div class="m-t">2026 Local news sustainability grant</div><div class="m-s">stage: renewal · <span style="color:var(--primary-500);font-weight:600;">primary</span></div></div>
+                            <div class="mini"><div class="m-t">Election coverage initiative</div><div class="m-s">stage: proposal</div></div>
+                        </div></div>
+                    </div>
+                </div>
+                <p class="caption">The mirror question — "who funds this opportunity?" — uses <code>steward_get_opportunity_funders</code>.</p>
+            </article>
+        </section>
+
+        <!-- ═══════════════ C ═══════════════ -->
+        <section class="block" id="c">
+            <div class="block-h"><span class="idx">Block C</span><h2>Draft generation</h2></div>
+            <p class="block-note">The core of the product. Drafts arrive in Steward's canonical rich-text format and render in a draft viewer with versioning, editing, copy, and feedback — the full extension experience, inline in chat.</p>
+
+            <article class="case">
+                <h3><span class="cid">C0</span>Zero-context request — Steward suggests who it's for<span class="try">Try it</span></h3>
+                <p class="sc">The user names only the document. Claude calls <code>steward_suggest_context</code>, which matches the request against the workspace and returns ranked suggestions: the best-fitting document type, funders scored by name mentions and grant history, renewal-stage opportunities, and the active draft to continue. The user picks with one tap instead of filling out a form.</p>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Write a grant renewal letter</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_suggest_context</span>
+                        <div class="widget" id="suggest">
+                            <div class="w-head"><span>Steward · suggested context</span><span>matched: Grant renewal letter</span></div>
+
+                            <div class="sg-sec">Continue where you left off</div>
+                            <div class="sug" id="sg-continue">
+                                <div><div class="s-n">Active draft — Knight Foundation renewal</div>
+                                    <div class="s-r"><span class="why hot">3 versions · yesterday</span><span class="why">Grant renewal letter</span></div></div>
+                                <span class="w-meta">open →</span>
+                            </div>
+
+                            <div class="sg-sec">Who is it for? Pick one or more</div>
+                            <div id="sg-funders"></div>
+
+                            <div class="sg-sec">Related opportunities</div>
+                            <div id="sg-deals"></div>
+
+                            <div class="w-bar">
+                                <button class="btn brand" id="sg-go">Generate with selection ↗</button>
+                                <button class="btn" id="sg-blank">None of these — start blank</button>
+                            </div>
+                        </div>
+                        <div class="msg user" id="sg-echo" style="display:none;margin-top:12px;">
+                            <div class="who">User (sent by the widget)</div><div class="bubble" id="sg-echo-text"></div>
+                        </div>
+                    </div>
+                </div>
+                <p class="caption"><b>Under the hood:</b> ranking is transparent and cheap — name overlap with the request, last-grant amount from funder records, opportunity stage fit (renewal-flavoured requests boost renewal-stage deals), plus the active session from <code>steward_get_workspace</code>. Claude is instructed to call this tool automatically whenever a generation request arrives without context objects.</p>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">C1</span>Generate a first draft — full draft viewer<span class="try">Try it</span></h3>
+                <p class="sc">Everything works below: browse versions with ‹ ›, hit ✎ Edit for the 12-control formatting toolbar, Save to create a new version, Copy for a Gmail-ready clipboard, 👍/👎 for tagged feedback.</p>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Write a renewal letter for the Knight Foundation, 300 words max. Mention our water-quality series.</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_start_session</span>
+                        <span class="tool"><span class="tk">✓</span> steward_generate_draft</span>
+
+                        <div class="widget" id="viewer">
+                            <div class="w-head">
+                                <span>Steward · draft viewer</span>
+                                <span class="vnav">
+              <button id="v-prev" aria-label="Previous version">‹</button>
+              <span class="vbadge" id="v-badge">Version 1</span>
+              <button id="v-next" aria-label="Next version">›</button>
+            </span>
+                            </div>
+                            <div id="ed-zone">
+                                <div class="toolbar" role="toolbar" aria-label="Formatting">
+                                    <button class="tb" data-cmd="bold" title="Bold" style="font-weight:700;">B</button>
+                                    <button class="tb" data-cmd="italic" title="Italic" style="font-style:italic;">I</button>
+                                    <button class="tb" data-cmd="underline" title="Underline" style="text-decoration:underline;">U</button>
+                                    <button class="tb" data-cmd="strikeThrough" title="Strikethrough" style="text-decoration:line-through;">S</button>
+                                    <span class="tb-sep"></span>
+                                    <button class="tb" data-cmd="insertOrderedList" title="Ordered list">1.</button>
+                                    <button class="tb" data-cmd="insertUnorderedList" title="Bullet list">•</button>
+                                    <button class="tb" id="tb-quote" title="Blockquote">❝</button>
+                                    <span class="tb-sep"></span>
+                                    <button class="tb" id="tb-align" title="Align (currently left)">
+                                        <svg viewBox="0 0 20 20"><line x1="2" y1="5" x2="18" y2="5"/><line id="al-mid" x1="2" y1="10" x2="12" y2="10"/><line x1="2" y1="15" x2="18" y2="15"/></svg>
+                                    </button>
+                                    <button class="tb" data-cmd="outdent" title="Decrease indent">⇤</button>
+                                    <button class="tb" data-cmd="indent" title="Increase indent">⇥</button>
+                                </div>
+                                <div class="draft" id="draft" aria-label="Draft content"></div>
+                            </div>
+                            <div class="w-bar" id="view-bar">
+                                <button class="btn primary" id="b-copy">⧉ Copy</button>
+                                <button class="btn" id="b-edit">✎ Edit</button>
+                                <span class="grow"></span>
+                                <button class="btn icon" id="b-like" aria-label="Like">👍</button>
+                                <button class="btn icon" id="b-dislike" aria-label="Dislike">👎</button>
+                            </div>
+                            <div class="w-bar" id="edit-bar" style="display:none;">
+                                <span class="w-meta">Editing version <span id="ed-from"></span> → saves as a new version</span>
+                                <span class="grow"></span>
+                                <button class="btn" id="b-cancel">Cancel</button>
+                                <button class="btn primary" id="b-save">Save</button>
+                            </div>
+                            <div class="fb" id="fb">
+                                <div class="fb-t">Choose one tag <span class="req">Required</span></div>
+                                <div id="fb-tags"></div>
+                                <textarea id="fb-text" placeholder="Optional: tell us more…"></textarea>
+                                <div class="w-bar"><span class="grow"></span>
+                                    <button class="btn" id="fb-cancel">Cancel</button>
+                                    <button class="btn primary" id="fb-send" disabled>Submit feedback</button>
+                                </div>
+                            </div>
+                            <div class="w-meta" style="margin-top:10px;">session 8f3a2c1d… · word limit 300 · canonical rich-text</div>
+                        </div>
+                    </div>
+                </div>
+                <p class="caption"><b>Under the hood:</b> Save → <code>steward_save_user_edit</code> (content is sanitized to the canonical format, <code>editedFrom</code> points at the exact version edited); Copy writes both <code>text/html</code> and <code>text/plain</code> and fires <code>steward_track_copy</code>; feedback goes through <code>steward_submit_feedback</code> with the required tag.</p>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">C2</span>Quick draft — no funder, no doc type</h3>
+                <p class="sc">Both are optional, exactly as in the extension.</p>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Sketch a generic thank-you note template for a first-time donor</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_generate_draft · no context objects</span>
+                        <div class="bubble">Here's a warm, reusable template — want me to adapt it for a specific funder next?</div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">C3</span>Multi-object context</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">The letter should cover both Knight Foundation and Knight-Lenfest Fund, in the context of the sustainability grant</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_generate_draft · 2 funders + 1 opportunity</span>
+                        <div class="banner ok">Primary context: Knight Foundation, Knight-Lenfest Fund · 2026 Local news sustainability grant</div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">C4</span>Auto-attached relationships</h3>
+                <p class="sc">When the document type allows it, Claude pulls the 1-hop linked objects itself and passes them as supporting context — weighted differently from the user's explicit picks.</p>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Write for Knight Foundation — pull the related context yourself</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_get_funder_opportunities</span>
+                        <span class="tool"><span class="tk">✓</span> steward_generate_draft</span>
+                        <div class="banner ok">Primary: 1 funder · Supporting (auto-linked): 2 opportunities</div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">C5</span>Refinement: "make it warmer"</h3>
+                <p class="sc">No IDs needed on follow-ups — Claude carries the current version and chat history forward. Changes highlighted for illustration.</p>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Warmer tone, and add a thank-you to the program board for their mentorship</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_generate_draft · currentVersion + chatHistory</span>
+                        <div class="widget">
+                            <div class="w-head"><span>Steward · draft viewer</span><span class="vnav"><span class="vbadge">Version 2 of 2</span></span></div>
+                            <div class="draft">
+                                <p>Dear Ms. Alvarez,</p>
+                                <p><span class="hl">All of us at the Riverside Chronicle are deeply grateful</span> for the Knight Foundation's partnership — <span class="hl">and for the mentorship your program board has so generously offered our editors</span>. Your 2025 grant expanded accountability reporting to three underserved counties…</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">C6</span>Word limit, after the fact</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Cut it to 150 words without losing the numbers</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_generate_draft · wordLimit 150</span>
+                        <div class="banner ok">Version 3 · 148 words · all metrics preserved</div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">C7</span>Multi-turn conversation</h3>
+                <p class="sc">The full chat history travels with every request, so surgical follow-ups just work.</p>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Now rewrite the third paragraph as a bullet list</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_generate_draft · full chatHistory</span>
+                        <div class="widget"><div class="draft">
+                            <p>We respectfully request renewal at <strong>$150,000</strong>, which will fund:</p>
+                            <ul><li>Two full-time accountability reporters</li><li>A bilingual community listening program</li><li>Audience analytics to measure civic impact</li></ul>
+                        </div></div>
+                    </div>
+                </div>
+            </article>
+        </section>
+
+        <!-- ═══════════════ D ═══════════════ -->
+        <section class="block" id="d">
+            <div class="block-h"><span class="idx">Block D</span><h2>Context documents</h2></div>
+            <p class="block-note">Users ground drafts in their own Google Drive documents — impact reports, budgets, board letters. Up to 5 per request.</p>
+
+            <article class="case">
+                <h3><span class="cid">D1–D2</span>List documents, pick, generate<span class="try">Try it</span></h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">What documents can Steward see? Use the impact report and the budget for the letter.</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_list_context_documents</span>
+                        <div class="widget" id="docs">
+                            <div class="w-head"><span>Steward · context documents</span><span id="doc-count"></span></div>
+                            <div id="doc-list"></div>
+                            <div class="w-bar">
+                                <button class="btn primary" id="doc-gen">Generate with selected</button>
+                                <span class="w-meta">max 5 per request</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <p class="caption"><b>Try:</b> toggle a document's selection, remove one, then Generate with selected.</p>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">D3</span>Register a known Drive file</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Add file 1AbC…xyz from our Drive to my context</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_register_context_documents</span>
+                        <div class="banner ok">Registered: Q2 board update.docx — now available as draft context.</div>
+                    </div>
+                </div>
+                <p class="caption"><b>Honest limit:</b> browsing Drive for <i>new</i> files requires the browser-based Google Picker, which stays on the platform. Claude offers the link rather than pretending.</p>
+            </article>
+        </section>
+
+        <!-- ═══════════════ E ═══════════════ -->
+        <section class="block" id="e">
+            <div class="block-h"><span class="idx">Block E</span><h2>Versions &amp; feedback</h2></div>
+            <p class="block-note">Every generation, manual edit, piece of feedback, and copy event is versioned server-side — a complete audit trail per session. The live controls are in the C1 draft viewer above; here's what each does.</p>
+
+            <article class="case">
+                <h3><span class="cid">E1</span>Manual edit → new version</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">I rewrote the second paragraph myself — save it as a new version</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_save_user_edit · editedFrom 2</span>
+                        <div class="banner ok">Saved as version 3 · marked "your edit" in the timeline</div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">E2–E3</span>Tagged feedback</h3>
+                <p class="sc">The product requires one tag per rating — the same eight tags as the extension. Positive: Strong funder alignment · Clear impact + metrics · Used my context well · Well framed for this audience. Negative: Too generic · Weak alignment · Missing impact or metrics · Tone didn't fit.</p>
+                <div class="chat">
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_submit_feedback · like · "Used my context well"</span>
+                        <div class="banner ok">Thanks! Your feedback helps Steward learn your funders.</div>
+                        <div class="bubble" style="margin-top:8px;">Noted. Want me to lean into that context even more on the next draft?</div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">E5</span>Copy, Gmail-ready</h3>
+                <p class="sc">One click writes both clipboard flavours — rich HTML (blockquotes and lists survive pasting into Gmail) and clean plain text — and records the copy event for analytics.</p>
+                <div class="flow">
+                    <span class="fstep g">⧉ Copy</span><span class="arr">→</span>
+                    <span class="fstep">text/html + text/plain</span><span class="arr">→</span>
+                    <span class="fstep">steward_track_copy</span>
+                </div>
+            </article>
+        </section>
+
+        <!-- ═══════════════ F ═══════════════ -->
+        <section class="block" id="f">
+            <div class="block-h"><span class="idx">Block F</span><h2>Sessions</h2></div>
+
+            <article class="case">
+                <h3><span class="cid">F1–F2</span>Switch topics, switch types</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Actually this should be an impact report update, not a letter</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_update_session · docType → Impact report update</span>
+                        <div class="bubble">Switched — the next versions will follow impact-report instructions. Your session history is intact.</div>
+                    </div>
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Now something completely different: an LOI for MacArthur</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_start_session · previous auto-archived</span>
+                        <div class="bubble">Fresh session started for the MacArthur LOI. What's the ask?</div>
+                    </div>
+                </div>
+            </article>
+        </section>
+
+        <!-- ═══════════════ G ═══════════════ -->
+        <section class="block" id="g">
+            <div class="block-h"><span class="idx">Block G</span><h2>Beyond the extension</h2></div>
+            <p class="block-note">The business case for MCP: Steward stops being a side panel and becomes a building block in any agentic workflow — combined with email, Slack, docs, analysis, and automation, in one conversation.</p>
+
+            <article class="case">
+                <h3><span class="cid">G1</span>Batch generation in one sentence</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Generate a personalized year-end update for each of our top-5 funders by last grant amount</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_get_workspace</span>
+                        <span class="tool"><span class="tk">✓</span> start_session ×5</span>
+                        <span class="tool"><span class="tk">✓</span> generate_draft ×5</span>
+                        <div class="widget"><div class="mini-cards">
+                            <div class="mini"><div class="m-t">Knight Foundation</div><div class="m-s">$150k · draft ✓</div></div>
+                            <div class="mini"><div class="m-t">MacArthur</div><div class="m-s">$120k · draft ✓</div></div>
+                            <div class="mini"><div class="m-t">Emerson Collective</div><div class="m-s">$85k · draft ✓</div></div>
+                            <div class="mini"><div class="m-t">Democracy Fund</div><div class="m-s">$60k · draft ✓</div></div>
+                            <div class="mini"><div class="m-t">Local Media Assoc.</div><div class="m-s">$45k · draft ✓</div></div>
+                        </div></div>
+                        <div class="bubble" style="margin-top:8px;">Five drafts ready, each in its own session with a full audit trail. Review them all, or start with Knight?</div>
+                    </div>
+                </div>
+                <p class="caption">In the extension this is five manual sessions, one at a time. Here it's one sentence.</p>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">G2</span>Cross-tool: draft → straight to a Gmail draft</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Thank-you letter for Emerson Collective — and stage it as a Gmail draft to their program contact</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <div class="flow">
+                            <span class="fstep g">steward · generate_draft</span><span class="arr">→</span>
+                            <span class="fstep">gmail · create_draft</span><span class="arr">→</span>
+                            <span class="fstep">draft in inbox ✓</span>
+                        </div>
+                        <div class="banner ok">Gmail draft created: "Thank you from the Riverside Chronicle" → programs@emerson.co — rich formatting intact. Sending stays in your hands.</div>
+                    </div>
+                </div>
+                <p class="caption">The same chaining works with Slack (post for review), Google Docs (archive the draft), Notion (log the touchpoint) — any connector in the same chat.</p>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">G3</span>Pipeline gap analysis</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Which of our funders have no linked opportunity at all? Those are our pipeline gaps.</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_get_workspace</span>
+                        <span class="tool"><span class="tk">✓</span> get_funder_opportunities ×37</span>
+                        <div class="banner warn">6 of 37 funders have no linked opportunity: Democracy Fund, Lenfest Institute, … — want outreach drafts for each?</div>
+                    </div>
+                </div>
+                <p class="caption">Analysis the extension could never do — and it ends with an offer to act on the result.</p>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">G4</span>Headless automation — Codex / CI</h3>
+                <p class="sc">The same server, no UI: scheduled agents generate weekly funder updates and commit them to a communications repository.</p>
+                <div class="term">
+                    <span class="p">$</span> codex mcp add steward -- node /opt/steward-mcp/dist/index.js
+                    <span class="p">$</span> codex exec <span class="c">"Generate this week's funder update for every active opportunity
+   via Steward and save each draft to comms/2026-W31/"</span>
+                    <span class="c">→ steward_get_workspace ✓  → generate_draft ×8 ✓  → 8 files written</span></div>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">G5</span>Two strategies, side by side</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Give me two takes — formal and warm — and tell me which fits Knight's profile better</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> steward_generate_draft ×2</span>
+                        <div class="two-col">
+                            <div class="variant"><div class="v-l">Formal</div>The Riverside Chronicle respectfully submits this request for renewed support of its accountability desk…</div>
+                            <div class="variant"><div class="v-l">Warm</div>Your partnership made our water-quality series possible — and our readers noticed…</div>
+                        </div>
+                        <div class="bubble" style="margin-top:10px;">Knight's own materials emphasize community impact over institutional language — I'd lead with the warm version and keep the formal one for the board packet.</div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">G6</span>Long documents, section by section</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">This will be a full impact report — build it section by section: achievements, financials, plans</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool"><span class="tk">✓</span> generate_draft · §1 achievements</span>
+                        <span class="tool"><span class="tk">✓</span> generate_draft · §2 financials</span>
+                        <span class="tool"><span class="tk">✓</span> generate_draft · §3 plans</span>
+                        <div class="banner ok">Three sections, three server-side versions — the whole build is auditable and reversible.</div>
+                    </div>
+                </div>
+            </article>
+        </section>
+
+        <!-- ═══════════════ H ═══════════════ -->
+        <section class="block" id="h">
+            <div class="block-h"><span class="idx">Block H</span><h2>Errors &amp; limits — the user's view</h2></div>
+            <p class="block-note">Every failure mode maps to a plain-language response. No raw stack traces, no silent retries.</p>
+
+            <article class="case">
+                <h3><span class="cid">H1</span>Duplicate feedback (409)</h3>
+                <div class="chat">
+                    <div class="msg user"><div class="who">User</div><div class="bubble">Like this version again</div></div>
+                    <div class="msg ai"><div class="who">Claude</div>
+                        <span class="tool err"><span class="tk">✕</span> steward_submit_feedback · 409 feedback_already_given</span>
+                        <div class="banner warn">Version 2 already has feedback. I can retract it, or you can rate a different version.</div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="case">
+                <h3><span class="cid">H2</span>Full reference</h3>
+                <table class="errs">
+                    <tr><th>Situation</th><th>Signal</th><th>What the user hears</th></tr>
+                    <tr><td>Not signed in</td><td><code>401 no_session_token</code></td><td>"Let's connect — grab a code from the platform" (A1)</td></tr>
+                    <tr><td>Session expired</td><td><code>401</code></td><td>Fresh code requested; context preserved (A2)</td></tr>
+                    <tr><td>Access revoked</td><td><code>403</code> + specific code</td><td>Plain explanation, points to org admin, no retries (A3)</td></tr>
+                    <tr><td>More than 5 documents</td><td>input validation</td><td>"Five max — which are the most important?"</td></tr>
+                    <tr><td>Duplicate feedback</td><td><code>409 feedback_already_given</code></td><td>Offer to retract or rate another version (H1)</td></tr>
+                    <tr><td>Feedback on closed session</td><td><code>409 session_inactive</code></td><td>"That session is archived — feedback stays with active ones"</td></tr>
+                    <tr><td>Unknown version</td><td><code>400 version_not_found</code></td><td>"No such version — the latest are 1–4"</td></tr>
+                    <tr><td>Wrong environment URL</td><td><code>invalid_backend_response</code></td><td>"Check the API base URL — dev vs production?"</td></tr>
+                    <tr><td>New file from Drive</td><td>needs a browser</td><td>Link to the platform's Google Picker (D3)</td></tr>
+                </table>
+            </article>
+        </section>
+
+    </main>
+</div>
+
+<footer>
+    <div class="wrap">Steward MCP · product walkthrough · all mockups follow the live API contracts of funder-comms-backend · July 2026</div>
+</footer>
+
+<div id="toast" role="status"></div>
+
+<script>
+    function toast(t){ var el=document.getElementById('toast'); el.textContent=t; el.classList.add('show'); clearTimeout(el._t); el._t=setTimeout(function(){el.classList.remove('show');},2400); }
+
+    /* ══ B1: workspace picker ══ */
+    var WS={
+        documentTypes:[{id:'dt-renewal',name:'Grant renewal letter'},{id:'dt-loi',name:'LOI'},{id:'dt-impact',name:'Impact report update'},{id:'dt-thanks',name:'Thank-you note'}],
+        funders:[{id:'f-knight',name:'Knight Foundation',sub:'last grant $150k'},{id:'f-kl',name:'Knight-Lenfest Fund',sub:'$40k'},{id:'f-mac',name:'MacArthur Foundation',sub:'$120k'},{id:'f-em',name:'Emerson Collective',sub:'$85k'},{id:'f-df',name:'Democracy Fund',sub:'$60k'}],
+        deals:[{id:'d-sus',name:'2026 Local news sustainability grant'},{id:'d-crf',name:'Community reporting fund'},{id:'d-eci',name:'Election coverage initiative'}]
+    };
+    var sel={dt:'dt-renewal',f:['f-knight'],d:['d-sus']};
+    function has(a,x){return a.indexOf(x)>=0;}
+    function togg(a,x){var i=a.indexOf(x); if(i>=0)a.splice(i,1); else a.push(x);}
+    function pill(label,on,sub){
+        var s=document.createElement('span'); s.className='pill'+(on?' sel':''); s.textContent=label;
+        if(sub){var x=document.createElement('span');x.className='sub-l';x.textContent=sub;s.appendChild(x);}
+        return s;
+    }
+    function renderPicker(){
+        var dt=document.getElementById('pk-dt'); dt.innerHTML='';
+        WS.documentTypes.forEach(function(x){
+            var p=pill(x.name, sel.dt===x.id);
+            p.onclick=function(){ sel.dt = sel.dt===x.id?null:x.id; renderPicker(); };
+            dt.appendChild(p);
+        });
+        var fq=document.getElementById('pk-fq').value.trim().toLowerCase();
+        var f=document.getElementById('pk-f'); f.innerHTML='';
+        WS.funders.filter(function(x){return !fq||x.name.toLowerCase().indexOf(fq)>=0;}).forEach(function(x){
+            var p=pill(x.name, has(sel.f,x.id), x.sub);
+            p.onclick=function(){ togg(sel.f,x.id); renderPicker(); };
+            f.appendChild(p);
+        });
+        var dq=document.getElementById('pk-dq').value.trim().toLowerCase();
+        var d=document.getElementById('pk-d'); d.innerHTML='';
+        WS.deals.filter(function(x){return !dq||x.name.toLowerCase().indexOf(dq)>=0;}).forEach(function(x){
+            var p=pill(x.name, has(sel.d,x.id));
+            p.onclick=function(){ togg(sel.d,x.id); renderPicker(); };
+            d.appendChild(p);
+        });
+        document.getElementById('pk-count').textContent=(sel.dt?1:0)+' doc type · '+sel.f.length+' funders · '+sel.d.length+' opportunities';
+    }
+    document.getElementById('pk-fq').oninput=renderPicker;
+    document.getElementById('pk-dq').oninput=renderPicker;
+    document.getElementById('pk-use').onclick=function(){
+        var dt=WS.documentTypes.filter(function(x){return x.id===sel.dt;})[0];
+        function names(ids,all){return ids.map(function(id){return all.filter(function(a){return a.id===id;})[0].name;}).join(', ');}
+        document.getElementById('pk-echo-text').textContent='Use this Steward context: documentType='+(dt?dt.name:'none')+'; funders=['+names(sel.f,WS.funders)+']; opportunities=['+names(sel.d,WS.deals)+']';
+        document.getElementById('pk-echo').style.display='block';
+        toast('Selection sent to chat — in the live MCP this becomes your next message');
+    };
+    renderPicker();
+
+    /* ══ C1: draft viewer with versions, edit, copy, feedback ══ */
+    var V1='<p>Dear Ms. Alvarez,</p><p>On behalf of the <strong>Riverside Chronicle</strong>, thank you for the Knight Foundation\'s continued partnership. Your 2025 grant expanded accountability reporting to three underserved counties — coverage that reached <strong>42,000 new readers</strong> and prompted two county audits.</p><p>We respectfully request renewal at <strong>$150,000</strong> for the 2026 Local news sustainability grant.</p>';
+    var V2='<p>Dear Ms. Alvarez,</p><p>All of us at the <strong>Riverside Chronicle</strong> are deeply grateful for the Knight Foundation\'s partnership. Your 2025 grant expanded accountability reporting to three underserved counties — coverage that reached <strong>42,000 new readers</strong>.</p><blockquote>"The Chronicle\'s water-quality series was the reason our board reopened the contract review." — Commissioner J. Reyes</blockquote><p>We respectfully request renewal at <strong>$150,000</strong> for the 2026 Local news sustainability grant, which will fund:</p><ul><li>Two full-time accountability reporters</li><li>A bilingual community listening program</li></ul><p>We would welcome a conversation at your convenience.</p>';
+    var versions=[{html:V1,kind:'ai'},{html:V2,kind:'ai'}], cur=1, editing=false, snapshot='';
+    var draft=document.getElementById('draft');
+
+    function renderVersion(){
+        draft.innerHTML=versions[cur].html;
+        var b=document.getElementById('v-badge');
+        b.textContent='Version '+(cur+1)+' of '+versions.length+(versions[cur].kind==='edit'?' · your edit':'');
+        b.className='vbadge'+(versions[cur].kind==='edit'?' edit':'');
+        document.getElementById('v-prev').disabled=cur===0||editing;
+        document.getElementById('v-next').disabled=cur===versions.length-1||editing;
+    }
+    document.getElementById('v-prev').onclick=function(){ if(cur>0&&!editing){cur--;renderVersion();} };
+    document.getElementById('v-next').onclick=function(){ if(cur<versions.length-1&&!editing){cur++;renderVersion();} };
+
+    document.getElementById('b-copy').onclick=function(){
+        var html=draft.innerHTML, plain=draft.innerText;
+        var l=function(e){e.preventDefault();e.clipboardData.setData('text/html',html);e.clipboardData.setData('text/plain',plain);};
+        document.addEventListener('copy',l);
+        try{document.execCommand('copy');}finally{document.removeEventListener('copy',l);}
+        toast('Copied (text/html + text/plain) → steward_track_copy · onVersion '+(cur+1));
+    };
+
+    var zone=document.getElementById('ed-zone');
+    function setEditing(on){
+        editing=on;
+        zone.classList.toggle('editing',on);
+        draft.contentEditable=on?'true':'false';
+        document.getElementById('view-bar').style.display=on?'none':'flex';
+        document.getElementById('edit-bar').style.display=on?'flex':'none';
+        document.getElementById('fb').classList.remove('open');
+        document.getElementById('v-prev').disabled=on||cur===0;
+        document.getElementById('v-next').disabled=on||cur===versions.length-1;
+        if(on){snapshot=draft.innerHTML;document.getElementById('ed-from').textContent=cur+1;draft.focus();}
+    }
+    document.getElementById('b-edit').onclick=function(){setEditing(true);};
+    document.getElementById('b-cancel').onclick=function(){draft.innerHTML=snapshot;setEditing(false);};
+    document.getElementById('b-save').onclick=function(){
+        var canonical=sanitizeCanonical(draft.innerHTML);
+        var from=document.getElementById('ed-from').textContent;
+        versions.push({html:canonical,kind:'edit'});
+        cur=versions.length-1;
+        setEditing(false); renderVersion();
+        toast('steward_save_user_edit · editedFrom '+from+' → saved as version '+versions.length);
+    };
+
+    Array.prototype.forEach.call(document.querySelectorAll('.tb[data-cmd]'),function(b){
+        b.onmousedown=function(e){e.preventDefault();};
+        b.onclick=function(){document.execCommand(b.getAttribute('data-cmd'),false,null);refreshToolbar();};
+    });
+    function closestIn(tag){
+        var s=getSelection(); if(!s.rangeCount)return null;
+        var n=s.getRangeAt(0).startContainer;
+        while(n&&n!==draft){ if(n.nodeType===1&&n.tagName.toLowerCase()===tag)return n; n=n.parentNode; }
+        return null;
+    }
+    var qbtn=document.getElementById('tb-quote');
+    qbtn.onmousedown=function(e){e.preventDefault();};
+    qbtn.onclick=function(){document.execCommand('formatBlock',false,closestIn('blockquote')?'p':'blockquote');refreshToolbar();};
+    var ALIGNS=['left','center','right'],alignIdx=0;
+    var alignBtn=document.getElementById('tb-align');
+    alignBtn.onmousedown=function(e){e.preventDefault();};
+    alignBtn.onclick=function(){
+        alignIdx=(alignIdx+1)%3;
+        document.execCommand({left:'justifyLeft',center:'justifyCenter',right:'justifyRight'}[ALIGNS[alignIdx]],false,null);
+        alignBtn.title='Align (currently '+ALIGNS[alignIdx]+')';
+        var mid=document.getElementById('al-mid');
+        if(ALIGNS[alignIdx]==='center'){mid.setAttribute('x1',5);mid.setAttribute('x2',15);}
+        else if(ALIGNS[alignIdx]==='right'){mid.setAttribute('x1',8);mid.setAttribute('x2',18);}
+        else{mid.setAttribute('x1',2);mid.setAttribute('x2',12);}
+    };
+    function refreshToolbar(){
+        Array.prototype.forEach.call(document.querySelectorAll('.tb[data-cmd]'),function(b){
+            var c=b.getAttribute('data-cmd');
+            if(['bold','italic','underline','strikeThrough','insertOrderedList','insertUnorderedList'].indexOf(c)>=0){
+                b.classList.toggle('on',document.queryCommandState(c));
+            }
+        });
+        qbtn.classList.toggle('on',!!closestIn('blockquote'));
+    }
+    draft.addEventListener('keyup',refreshToolbar);
+    draft.addEventListener('mouseup',refreshToolbar);
+
+    var ALLOWED=['P','BR','OL','UL','LI','BLOCKQUOTE','H2','H3','STRONG','EM','U','S','A','B','I'];
+    function sanitizeCanonical(html){
+        var doc=new DOMParser().parseFromString(html,'text/html');
+        (function walk(node){
+            Array.prototype.slice.call(node.children).forEach(function(el){
+                walk(el);
+                if(el.tagName==='B'||el.tagName==='I'){
+                    var r=document.createElement(el.tagName==='B'?'strong':'em');
+                    while(el.firstChild)r.appendChild(el.firstChild);
+                    el.parentNode.replaceChild(r,el);return;
+                }
+                if(el.tagName==='DIV'){
+                    var p=document.createElement('p');
+                    while(el.firstChild)p.appendChild(el.firstChild);
+                    el.parentNode.replaceChild(p,el);return;
+                }
+                if(ALLOWED.indexOf(el.tagName)<0){
+                    while(el.firstChild)el.parentNode.insertBefore(el.firstChild,el);
+                    el.remove();return;
+                }
+                Array.prototype.slice.call(el.attributes).forEach(function(a){
+                    var keep=(a.name==='href'&&el.tagName==='A'&&/^(https?:|mailto:)/i.test(a.value))||
+                        (a.name==='style'&&/^(text-align:\s*(left|center|right)|margin-left:\s*\d+px)\s*;?\s*$/i.test(a.value));
+                    if(!keep)el.removeAttribute(a.name);
+                });
+                if(el.tagName==='A')el.setAttribute('rel','noopener noreferrer');
+            });
+        })(doc.body);
+        return doc.body.innerHTML;
+    }
+
+    var TAGS={like:['Strong funder alignment','Clear impact + metrics','Used my context well','Well framed for this audience'],
+        dislike:['Too generic','Weak alignment','Missing impact or metrics',"Tone didn't fit"]};
+    var fbType=null,fbTag=null;
+    function openFb(type){
+        fbType=type;fbTag=null;
+        var box=document.getElementById('fb-tags');box.innerHTML='';
+        TAGS[type].forEach(function(t){
+            var el=document.createElement('span');el.className='tag';el.textContent=t;
+            el.onclick=function(){
+                fbTag=t;
+                Array.prototype.forEach.call(box.children,function(c){c.classList.toggle('sel',c===el);});
+                document.getElementById('fb-send').disabled=false;
+            };
+            box.appendChild(el);
+        });
+        document.getElementById('fb-send').disabled=true;
+        document.getElementById('fb-text').value='';
+        document.getElementById('fb').classList.add('open');
+    }
+    document.getElementById('b-like').onclick=function(){openFb('like');};
+    document.getElementById('b-dislike').onclick=function(){openFb('dislike');};
+    document.getElementById('fb-cancel').onclick=function(){document.getElementById('fb').classList.remove('open');};
+    document.getElementById('fb-send').onclick=function(){
+        document.getElementById('fb').classList.remove('open');
+        toast('steward_submit_feedback · '+fbType+' · "'+fbTag+'" · onVersion '+(cur+1));
+    };
+    renderVersion();
+
+    /* ══ C0: context suggestions ══ */
+    var SUG={
+        funders:[
+            {id:'f-knight',name:'Knight Foundation',reasons:[{t:'renewal candidate',hot:true},{t:'last grant $150k'},{t:'11 months since award'}],sel:true},
+            {id:'f-mac',name:'MacArthur Foundation',reasons:[{t:'renewal candidate',hot:true},{t:'last grant $120k'}],sel:false},
+            {id:'f-em',name:'Emerson Collective',reasons:[{t:'last grant $85k'}],sel:false}
+        ],
+        deals:[
+            {id:'d-sus',name:'2026 Local news sustainability grant',reasons:[{t:'stage: renewal',hot:true},{t:'linked to Knight Foundation'}],sel:true},
+            {id:'d-eci',name:'Election coverage initiative',reasons:[{t:'stage: proposal'}],sel:false}
+        ]
+    };
+    function renderSug(){
+        ['funders','deals'].forEach(function(key){
+            var box=document.getElementById(key==='funders'?'sg-funders':'sg-deals'); box.innerHTML='';
+            SUG[key].forEach(function(x){
+                var c=document.createElement('div'); c.className='sug'+(x.sel?' sel':'');
+                var left=document.createElement('div');
+                var n=document.createElement('div'); n.className='s-n'; n.textContent=x.name; left.appendChild(n);
+                var r=document.createElement('div'); r.className='s-r';
+                x.reasons.forEach(function(w){var e=document.createElement('span');e.className='why'+(w.hot?' hot':'');e.textContent=w.t;r.appendChild(e);});
+                left.appendChild(r);
+                c.appendChild(left);
+                var tick=document.createElement('span'); tick.className='w-meta'; tick.textContent=x.sel?'✓ selected':'＋'; c.appendChild(tick);
+                c.onclick=function(){ x.sel=!x.sel; renderSug(); };
+                box.appendChild(c);
+            });
+        });
+    }
+    document.getElementById('sg-continue').onclick=function(){
+        toast('→ Continue active session 8f3a2c1d… — Claude opens the latest version');
+    };
+    document.getElementById('sg-go').onclick=function(){
+        var f=SUG.funders.filter(function(x){return x.sel;}).map(function(x){return x.name;});
+        var d=SUG.deals.filter(function(x){return x.sel;}).map(function(x){return x.name;});
+        document.getElementById('sg-echo-text').textContent='Generate the grant renewal letter for ['+(f.join(', ')||'—')+'] in the context of ['+(d.join(', ')||'—')+']';
+        document.getElementById('sg-echo').style.display='block';
+        toast('Selection sent — Claude proceeds to steward_generate_draft');
+    };
+    document.getElementById('sg-blank').onclick=function(){
+        document.getElementById('sg-echo-text').textContent='Generate the grant renewal letter without attaching any funder or opportunity context';
+        document.getElementById('sg-echo').style.display='block';
+        toast('Starting blank — steward_generate_draft with no context objects');
+    };
+    renderSug();
+
+    /* ══ D1: context documents ══ */
+    var DOCS=[
+        {id:'doc-1',name:'Impact report 2025.pdf',type:'PDF',sel:true},
+        {id:'doc-2',name:'Budget draft 2026.xlsx',type:'XLS',sel:true},
+        {id:'doc-3',name:'Board letter template.docx',type:'DOC',sel:false},
+        {id:'doc-4',name:'Audience survey results.pdf',type:'PDF',sel:false}
+    ];
+    function renderDocs(){
+        var list=document.getElementById('doc-list');list.innerHTML='';
+        DOCS.forEach(function(d){
+            var row=document.createElement('div');row.className='doc-row';
+            var nm=document.createElement('span');nm.className='nm';
+            nm.innerHTML='<span class="ficon">'+d.type+'</span> '+d.name;
+            var act=document.createElement('span');act.className='doc-act';
+            if(d.sel){var c=document.createElement('span');c.className='chk';c.textContent='selected ✓';act.appendChild(c);}
+            var tg=document.createElement('button');tg.className='link-btn';tg.textContent=d.sel?'Deselect':'Select';
+            tg.onclick=function(){d.sel=!d.sel;renderDocs();};
+            var rm=document.createElement('button');rm.className='link-btn danger';rm.textContent='Remove';
+            rm.onclick=function(){
+                DOCS.splice(DOCS.indexOf(d),1);renderDocs();
+                toast('steward_remove_context_documents · '+d.name+' removed');
+            };
+            act.appendChild(tg);act.appendChild(rm);
+            row.appendChild(nm);row.appendChild(act);
+            list.appendChild(row);
+        });
+        var n=DOCS.filter(function(d){return d.sel;}).length;
+        document.getElementById('doc-count').textContent=DOCS.length+' registered · '+n+' selected';
+        document.getElementById('doc-gen').disabled=n===0;
+    }
+    document.getElementById('doc-gen').onclick=function(){
+        var names=DOCS.filter(function(d){return d.sel;}).map(function(d){return d.name;});
+        toast('steward_generate_draft · fileIds: ['+names.length+'] — grounded in '+names.join(', '));
+    };
+    renderDocs();
+</script>
+</body>
+</html>

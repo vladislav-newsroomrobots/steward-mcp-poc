@@ -24,6 +24,7 @@ cp .env.example .env   # optional, every value has a default
 | `npm run dev` | builds the widget, then starts the server with reload on change |
 | `npm run build` | builds the widget and compiles TypeScript to `dist/` |
 | `npm run build:ui` | rebuilds only the widget (the server re-reads it per request) |
+| `npm run dev:ui` | Vite dev server for the widget — see [the widget](#the-widget) for what it can and cannot show |
 | `npm run start` | runs the compiled server |
 | `npm run typecheck` | type checks the server and the widget |
 | `npm run smoke` | acceptance check for the current stage (run `npm run build` first) |
@@ -51,7 +52,7 @@ leaks between conversations.
 | `ALLOWED_HOSTS` | — | extra `Host` values for the DNS-rebinding guard, comma separated; `*` disables the check (see below) |
 | `GENERATION_TIMEOUT_MS` | `120000` | how long a generation may stay open before it counts as failed |
 | `LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
-| `DEMO_MODE` | `false` | forces fallback drafts once generation exists (stage 5+) |
+| `DEMO_MODE` | `false` | reserved for the fallback drafts in `fixtures/drafts.json`; nothing reads it yet |
 
 Logs are JSON lines on stderr. Every HTTP request carries a `requestId` (also
 returned as the `x-request-id` header) and every tool call logs its name,
@@ -201,18 +202,27 @@ itself needs no change.
 | Name | Visible to | Purpose |
 |---|---|---|
 | `open_steward` | model, app | entry point; renders `ui://steward/app.html` in the conversation |
-| `get_workspace` | model, app | document types and funders; resolves a name the user said into an id |
+| `get_workspace` | model, app | document types, funders and the feedback tags; resolves a name the user said into an id |
 | `get_linked_objects` | model, app | the opportunities linked to a funder |
 | `request_generation` | model, app | returns the generation brief the model writes from |
 | `render_draft` | model | stores the document the model wrote and shows it in the panel |
+| `save_edit` | model, app | stores wording the user supplied as a new version, attributed to them |
+| `submit_feedback` | model, app | records a rating with one required tag |
+| `track_copy` | app | counts a draft leaving the panel for the clipboard |
 | `create_session` | app | opens a drafting session |
-| `get_session` | app | session state, polled by the widget while generating |
+| `get_session` | app | session state and every version, polled by the widget while generating |
 | `ping` | model, app | connectivity probe, no Steward logic |
 | `ui://steward/app.html` | — | resource: the single-file MCP Apps widget |
 
 Visibility comes from `_meta.ui.visibility`. Session plumbing is hidden from the
 model so it cannot wander into it, and `render_draft` is hidden from the widget
-because only the model produces drafts.
+because only the model produces drafts. `save_edit` and `submit_feedback` answer
+to both: the user can hand over their own wording, or rate a draft, in the chat
+as readily as in the panel.
+
+A rejected call carries its code in the message — `[FEEDBACK_ALREADY_GIVEN] …` —
+so the panel can tell a modelled outcome from a real failure, and the model can
+tell what not to retry.
 
 ## Workspace data
 
@@ -242,6 +252,35 @@ The `raw` payload carries every column of the export, most of it plumbing.
 contact, funder type, notes, and the opportunity's stage, amounts and next step.
 Passing `raw` wholesale would bury the few facts that change the prose.
 
+## The draft format
+
+Drafts are rich text, not plain text — the viewer renders paragraphs, lists and
+pull quotes, and a copy has to survive a paste into Gmail. The canonical format
+is a small subset of HTML:
+
+```text
+p · h2 · h3 · ul / ol / li · blockquote · strong · em · u · s · a[href] · br
+```
+
+No other tags, no attributes beyond `href` and a `text-align` / `margin-left`
+style, no classes. `render_draft` and `save_edit` sanitize into that subset rather
+than trusting their caller: a model can be asked to stay inside it, and
+`contenteditable` cannot. Plain text is accepted and wrapped in paragraphs, so a
+model that ignores the format still produces a readable draft.
+
+Two implementations, one allowlist: `src/generation/canonical-html.ts` for
+anything arriving over MCP, and `ui/src/canonical.ts` for the editor, which has a
+real DOM to work with.
+
+`render_draft` also accepts the parameter under its old name, `text`. That is not
+politeness: a host caches the tool list from its last scan, and a call whose
+arguments do not match the current schema is rejected **inside the SDK**, before
+the handler and before any logging. The server sees nothing at all, the attempt
+times out, and it looks exactly like a model that never answered — which is a
+day's debugging for a renamed field. The alias absorbs it and logs
+`render_draft called with the legacy text parameter`, naming the fix: re-scan the
+connector.
+
 ## The generation cycle
 
 The server never calls an LLM. It hands the host model a brief and takes back a
@@ -270,6 +309,22 @@ A generation that never reaches `render_draft` is failed after
 rather than by a timer, so nothing leaks and nothing can sit in `generating`
 forever.
 
+### When a generation stalls
+
+The model stopping after the brief is the one failure the panel cannot observe,
+and during a spike it is a normal Tuesday rather than an exception. A deadline
+that only produced a red status would leave the finished letter sitting in the
+model's context with no way to get it out, so the panel offers three ways on:
+
+| | |
+|---|---|
+| **Check again** | one read of `get_session`. A late `render_draft` is accepted — it stores the version and revives the failed session — so this picks up a draft that arrived after the deadline |
+| **Ask the model again** | re-runs the same request against the same session |
+| **Copy session id** | the part that cannot be improvised: paste it into the chat and ask the model to call `render_draft` with the document it already wrote. In variant B the id otherwise appears only in the widget's own message |
+
+The attempt still counts as a timeout in `/stats` even when a late draft lands.
+That is deliberate: the metric measures whether the cycle completes on its own.
+
 ### Measuring reliability
 
 Every attempt is recorded. `GET /stats` returns JSON;
@@ -296,51 +351,95 @@ src/
 ├── logger.ts      structured logging
 ├── paths.ts       package-root-relative paths
 ├── mcp/           MCP server factory, tools, resources
-├── data/          fixtures loading          (stage 3)
-├── store/         in-memory session store   (stage 3)
-├── generation/    generation brief builder  (stage 5)
+├── data/          fixture loading, feedback tags
+├── store/         in-memory session store, versions and events
+├── generation/    brief builder and the canonical draft format
 └── types/         shared domain types
 ui/
-├── index.html     widget shell and styles
-├── src/main.ts    widget logic
-└── dist/app.html  build output, served as the MCP Apps resource (git-ignored)
+├── index.html     Vite entry — a mount point, nothing else
+├── vite.config.ts single-file build configuration
+└── src/
+    ├── main.tsx      bootstrap and the fatal-error banner
+    ├── App.tsx       all panel state and every tool call
+    ├── host.ts       the MCP Apps client, and error codes recovered from it
+    ├── canonical.ts  sanitizer for the editor
+    ├── clipboard.ts  rich + plain clipboard write
+    ├── suggest.ts    context ranking for a request that names nobody
+    ├── styles.css    extension design tokens
+    └── components/   picker, suggestions, draft viewer, toolbar, feedback,
+                      failure recovery
+dist/app.html      build output, served as the MCP Apps resource (git-ignored)
 scripts/
-├── build-ui.mjs   esbuild bundle → single self-contained HTML
+├── build-ui.mjs   Vite build → single self-contained HTML, plus its guard rails
 └── smoke.mjs      acceptance check
-fixtures/          JSON fixture data         (stage 3)
+fixtures/          JSON fixture data
 ```
 
 ## The widget
 
-The host renders the widget in a sandboxed iframe under a strict CSP, so
-everything is inlined into one HTML file — no external scripts, styles or
-fonts. `scripts/build-ui.mjs` bundles `ui/src/main.ts` with esbuild and injects
-it into `ui/index.html`.
+Vite + React, bundled into one self-contained `ui/dist/app.html`. The host renders
+it in a sandboxed iframe under a strict CSP, so nothing may come from an external
+origin — script, stylesheet and any asset are inlined, and `scripts/build-ui.mjs`
+fails the build if a single `src`/`href` to anything but a `data:` URI survives.
 
 Inside the iframe, `@modelcontextprotocol/ext-apps` connects to the host over
 `postMessage` and calls MCP tools through it. The server is never contacted
 directly by the iframe.
 
-Stage 4 may swap esbuild for Vite + React; the output contract — a single
-`ui/dist/app.html` — stays the same.
+`npm run dev:ui` serves the widget with hot reload, which is useful for layout
+work and nothing else: there is no host on the other side of `postMessage`, so the
+panel shows its connection error and no workspace. Anything involving data or
+generation is exercised through `npm run dev` and a real conversation.
 
-## Current state — stage 3
+### What the panel does
 
-The full `request_generation → model writes → render_draft` cycle works on
-fixture data, with refinement, both orchestration variants and reliability
-metrics. Briefs now carry the document type's own instructions plus real funder
-and opportunity context, so draft quality reflects what the product would
-actually produce.
+The design, the scenarios and the tokens come from `artifact/ui-prototype.html`,
+the product walkthrough. Its live panels are implemented here:
 
-The widget has document type, funder and opportunity pickers and surfaces the
-writing tips, but it is still a spike harness rather than the real interface —
-that is stage 4. Manual editing, version history, feedback and copy tracking are
-stage 5; the session store already implements them and they are covered by the
-smoke check ahead of the tools that expose them.
+| Walkthrough | In the panel |
+|---|---|
+| B1 workspace picker | document type, funder and opportunity as pills, with search |
+| B2 resume a session | the summary cards above the draft |
+| C0 zero-context request | ranked suggestions with the reasons they scored on |
+| C1 draft viewer | versions ‹ ›, the formatting toolbar, copy, 👍/👎 |
+| C5–C7 refinement | **Ask for changes** reopens the picker; the current draft goes into the brief |
+| E1 manual edit | **Edit** → **Save**, stored as the user's own version |
+| E2–E3 tagged feedback | one tag required, the extension's eight |
+| E5 Gmail-ready copy | `text/html` + `text/plain`, then `track_copy` |
+| F1–F2 switch type, switch topic | change the picker mid-session, or start a new document |
+| H1 duplicate feedback | the server rejects it and the panel says so |
+| — a stalled generation | **Check again**, **Ask the model again**, **Copy session id** — see [when a generation stalls](#when-a-generation-stalls) |
 
-`npm run smoke` exercises the whole cycle server-side, standing in for the model.
-What it cannot check is whether a real host actually completes the cycle — that
-is what the matrix below is for.
+Three departures from the prototype, all deliberate:
+
+- **Fonts.** DM Sans and Inter are named but not loaded — the CSP forbids the
+  external origin, so readers who have them get them and everyone else gets the
+  system stack.
+- **One funder, one opportunity per draft.** The prototype multi-selects; the
+  tools take a single `funderId`/`dealId`, matching the brief the model writes
+  from. Multi-object context (C3, C4) needs the brief to change too.
+- **Opportunities load per funder**, not as a flat list — that is the backend
+  contract (`GET /platform/funders/:id/deals`) and what the extension does.
+
+Sign-in (block A) and Google Drive context documents (block D) are not here at
+all: neither has fixtures, tools or a backend in this PoC. They are phase 2.
+
+## Current state — stage 4
+
+The Steward interface is a React app in the extension's own visual language,
+running the full loop end to end on fixture data: pick context or accept the
+suggestions, generate, read the draft, edit it, rate it, copy it, ask for another
+version. Every one of those actions is a real tool call against the server; the
+session store keeps the version trail and the events behind them.
+
+Still open from the stage plan: multi-object context, the model-facing
+`suggest_context` tool (the ranking lives in the widget for now), demo-mode
+fallback drafts, and the formal error model of stage 6.
+
+`npm run smoke` exercises the whole server side, standing in for the model —
+including the canonical-format sanitizing and the edit/feedback/copy lifecycle.
+What it cannot check is whether a real host completes the cycle, or whether the
+panel renders as intended inside it: that needs ChatGPT and the matrix below.
 
 ### Running the reliability matrix
 

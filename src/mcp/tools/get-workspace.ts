@@ -2,6 +2,7 @@ import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
+import { FEEDBACK_TAGS } from '../../data/feedback-tags.js';
 import { workspace } from '../../data/workspace.js';
 import { withToolLogging } from '../with-tool-logging.js';
 
@@ -29,6 +30,7 @@ export function registerGetWorkspaceTool(server: McpServer): void {
                 funders: z.array(
                     z.object({ id: z.string(), name: z.string(), lastGrantAmount: z.string().optional() }),
                 ),
+                feedbackTags: z.object({ like: z.array(z.string()), dislike: z.array(z.string()) }),
             },
             annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
             _meta: { ui: { visibility: ['model', 'app'] } },
@@ -43,6 +45,9 @@ export function registerGetWorkspaceTool(server: McpServer): void {
                     name,
                     ...(lastGrantAmount === undefined ? {} : { lastGrantAmount }),
                 })),
+                // The panel needs them to require a tag per rating; the model
+                // needs them to offer the same wording when the user rates in chat.
+                feedbackTags: { like: [...FEEDBACK_TAGS.like], dislike: [...FEEDBACK_TAGS.dislike] },
             };
 
             return {

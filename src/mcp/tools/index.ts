@@ -8,6 +8,9 @@ import { registerOpenStewardTool } from './open-steward.js';
 import { registerPingTool } from './ping.js';
 import { registerRenderDraftTool } from './render-draft.js';
 import { registerRequestGenerationTool } from './request-generation.js';
+import { registerSaveEditTool } from './save-edit.js';
+import { registerSubmitFeedbackTool } from './submit-feedback.js';
+import { registerTrackCopyTool } from './track-copy.js';
 
 /**
  * Registers every Steward MCP tool on a per-session server instance.
@@ -25,4 +28,7 @@ export function registerTools(server: McpServer): void {
     registerRequestGenerationTool(server);
     registerRenderDraftTool(server);
     registerGetSessionTool(server);
+    registerSaveEditTool(server);
+    registerSubmitFeedbackTool(server);
+    registerTrackCopyTool(server);
 }

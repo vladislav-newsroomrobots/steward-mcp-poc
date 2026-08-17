@@ -11,7 +11,10 @@ export type StewardErrorCode =
     | 'MISSING_GENERATION_INPUT'
     | 'INVALID_WORD_LIMIT'
     | 'GENERATION_TIMEOUT'
-    | 'NO_FALLBACK_AVAILABLE';
+    | 'NO_FALLBACK_AVAILABLE'
+    | 'EMPTY_DRAFT'
+    | 'FEEDBACK_ALREADY_GIVEN'
+    | 'INVALID_FEEDBACK_TAG';
 
 export class StewardError extends Error {
     readonly code: StewardErrorCode;

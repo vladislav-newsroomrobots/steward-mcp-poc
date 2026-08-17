@@ -1,59 +1,64 @@
 /**
- * Bundles the MCP Apps widget into a single self-contained HTML file.
+ * Builds the MCP Apps widget into a single self-contained HTML file.
  *
  * The host renders `ui://steward/app.html` in a sandboxed iframe under a strict
- * CSP, so nothing may be loaded from an external origin — script and styles are
- * inlined into one document.
- *
- * Stage 4 may swap esbuild for Vite + React; the output contract (a single
- * `ui/dist/app.html`) stays the same.
+ * CSP, so nothing may be loaded from an external origin — script, styles and any
+ * asset are inlined into one document. Vite + React do the bundling
+ * (`ui/vite.config.ts`); this script exists for the two things Vite does not do:
+ * emit the file under the name the server serves, and refuse to ship a bundle
+ * that would only fail later inside the iframe.
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { build } from 'esbuild';
+import { build } from 'vite';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const templatePath = join(root, 'ui/index.html');
-const outputPath = join(root, 'ui/dist/app.html');
-const placeholder = '<!--APP_SCRIPT-->';
+const uiRoot = join(root, 'ui');
+const distDir = join(uiRoot, 'dist');
+const entryPath = join(distDir, 'index.html');
+const outputPath = join(distDir, 'app.html');
 
-const result = await build({
-    entryPoints: [join(root, 'ui/src/main.ts')],
-    bundle: true,
-    format: 'esm',
-    target: 'es2022',
-    platform: 'browser',
-    minify: true,
-    write: false,
-    logLevel: 'warning',
-});
+await build({ configFile: join(uiRoot, 'vite.config.ts'), logLevel: 'warn' });
 
-const [output] = result.outputFiles;
-if (!output) {
-    throw new Error('esbuild produced no output');
+// Vite names its output after the entry HTML; the resource URI is app.html.
+await rm(outputPath, { force: true });
+await rename(entryPath, outputPath);
+
+// `crossorigin` and `rel` describe a fetch that no longer happens once the asset
+// is inlined. Dropping them keeps the document honest about being self-contained.
+const html = (await readFile(outputPath, 'utf8'))
+    .replace(/(<(?:script|style)\b[^>]*?)\s+crossorigin(?=[\s>])/g, '$1')
+    .replace(/(<style\b[^>]*?)\s+rel="stylesheet"/g, '$1');
+
+const problems = [];
+
+if (!html.includes('<script type="module">')) {
+    problems.push('the bundle was not inlined as a module script');
 }
 
-const template = await readFile(templatePath, 'utf8');
-if (!template.includes(placeholder)) {
-    throw new Error(`${templatePath} is missing the ${placeholder} placeholder`);
+// Any surviving reference to a file or an origin is a widget that renders blank
+// in the host and works perfectly in a browser — the worst kind of bug to chase.
+for (const match of html.matchAll(/\s(?:src|href)="([^"]*)"/g)) {
+    const reference = match[1];
+    if (!reference.startsWith('data:') && !reference.startsWith('#')) {
+        problems.push(`external reference left in the bundle: ${reference}`);
+    }
 }
 
-// A literal `</script>` anywhere in the bundle would close the tag early.
-const script = output.text.replaceAll('</script', '<\\/script');
-
-// The replacement MUST be a function. With a string, `$&`, `$'` and friends in
-// the bundle are treated as substitution patterns and silently rewritten — zod
-// ships `replace(..., "\\$&")`, which would become `"\\<!--APP_SCRIPT-->"` and
-// corrupt every schema built on it.
-const html = template.replace(placeholder, () => `<script type="module">\n${script}\n</script>`);
-
-if (html.includes(placeholder)) {
-    throw new Error(`${placeholder} leaked into the bundle — the script injection corrupted the output`);
+const leftovers = (await readdir(distDir)).filter(name => name !== 'app.html' && !name.startsWith('.'));
+if (leftovers.length > 0) {
+    problems.push(`emitted files besides app.html: ${leftovers.join(', ')}`);
 }
 
-await mkdir(dirname(outputPath), { recursive: true });
+// Written before the verdict: reading the file is how you find out what went
+// wrong, and a bundle the server refuses to serve is better than a silent one.
 await writeFile(outputPath, html, 'utf8');
 
-console.log(`ui → ${outputPath} (${(Buffer.byteLength(html) / 1024).toFixed(1)} kB)`);
+if (problems.length > 0) {
+    throw new Error(`Widget bundle is not self-contained:\n  - ${problems.join('\n  - ')}`);
+}
+
+const { size } = await stat(outputPath);
+console.log(`ui → ${outputPath} (${(size / 1024).toFixed(1)} kB)`);

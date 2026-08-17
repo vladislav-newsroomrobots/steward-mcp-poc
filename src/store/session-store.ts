@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { config } from '../config.js';
+import { isFeedbackTag } from '../data/feedback-tags.js';
 import { StewardError } from '../errors.js';
 import type { DraftSource, FeedbackType, Session, SessionInputs } from '../types/index.js';
 
@@ -10,16 +11,25 @@ export interface SessionStore {
     /** Like `get`, but throws `SESSION_NOT_FOUND` instead of returning undefined. */
     require(id: string): Session;
     markGenerating(id: string, inputs: Partial<SessionInputs>): Session;
-    addVersion(id: string, text: string, source: DraftSource): Session;
-    /** A manual edit. Only creates a version if the text actually changed. */
-    saveEdit(id: string, text: string): Session;
-    addFeedback(id: string, versionId: string, type: FeedbackType): Session;
+    addVersion(id: string, html: string, source: DraftSource, editedFrom?: string): Session;
+    /** A manual edit. Only creates a version if the draft actually changed. */
+    saveEdit(id: string, html: string, editedFrom?: string): Session;
+    addFeedback(id: string, versionId: string, type: FeedbackType, tag: string, comment?: string): Session;
     addCopyEvent(id: string, versionId: string): Session;
     list(): Session[];
 }
 
-/** Normalised so whitespace-only edits do not create versions. */
-const normalise = (text: string): string => text.replace(/\s+/g, ' ').trim();
+/**
+ * Normalised so whitespace-only edits do not create versions. `contenteditable`
+ * rewrites markup as the user types — a stray `<br>` or a collapsed space is not
+ * an edit worth a version.
+ */
+const normalise = (html: string): string =>
+    html
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 
 /**
  * In-memory store, deliberately a module singleton rather than per-MCP-session
@@ -74,11 +84,17 @@ class InMemorySessionStore implements SessionStore {
         return session;
     }
 
-    addVersion(id: string, text: string, source: DraftSource): Session {
+    addVersion(id: string, html: string, source: DraftSource, editedFrom?: string): Session {
         const session = this.require(id);
         const now = new Date().toISOString();
 
-        session.versions.push({ id: randomUUID(), source, text, createdAt: now });
+        session.versions.push({
+            id: randomUUID(),
+            source,
+            html,
+            createdAt: now,
+            ...(editedFrom === undefined ? {} : { editedFrom }),
+        });
         session.status = 'ready';
         session.updatedAt = now;
         delete session.generationStartedAt;
@@ -87,26 +103,45 @@ class InMemorySessionStore implements SessionStore {
         return session;
     }
 
-    saveEdit(id: string, text: string): Session {
+    saveEdit(id: string, html: string, editedFrom?: string): Session {
         const session = this.require(id);
-        const current = session.versions.at(-1);
 
-        if (current && normalise(current.text) === normalise(text)) {
+        if (editedFrom !== undefined) {
+            this.#requireVersion(session, editedFrom);
+        }
+
+        // Compared against the version actually edited, not the latest: with two
+        // panels open, "no change" must mean no change to what the user saw.
+        const source = editedFrom === undefined ? session.versions.at(-1) : this.#version(session, editedFrom);
+
+        if (source && normalise(source.html) === normalise(html)) {
             return session;
         }
 
-        return this.addVersion(id, text, 'user');
+        return this.addVersion(id, html, 'user', editedFrom ?? source?.id);
     }
 
-    addFeedback(id: string, versionId: string, type: FeedbackType): Session {
+    addFeedback(id: string, versionId: string, type: FeedbackType, tag: string, comment?: string): Session {
         const session = this.require(id);
         this.#requireVersion(session, versionId);
+
+        if (!isFeedbackTag(type, tag)) {
+            throw new StewardError('INVALID_FEEDBACK_TAG', `"${tag}" is not a ${type} feedback tag`);
+        }
+
+        // The extension allows one rating per version; a second one would double
+        // count in the analytics the tags exist for.
+        if (session.events.some(event => event.kind === 'feedback' && event.versionId === versionId)) {
+            throw new StewardError('FEEDBACK_ALREADY_GIVEN', `Version ${versionId} already has feedback`);
+        }
 
         session.events.push({
             id: randomUUID(),
             kind: 'feedback',
             versionId,
             feedback: type,
+            tag,
+            ...(comment === undefined || comment.trim() === '' ? {} : { comment: comment.trim() }),
             at: new Date().toISOString(),
         });
 
@@ -126,8 +161,12 @@ class InMemorySessionStore implements SessionStore {
         return [...this.#sessions.values()].map(session => this.#applyTimeout(session));
     }
 
+    #version(session: Session, versionId: string) {
+        return session.versions.find(version => version.id === versionId);
+    }
+
     #requireVersion(session: Session, versionId: string): void {
-        if (!session.versions.some(version => version.id === versionId)) {
+        if (this.#version(session, versionId) === undefined) {
             throw new StewardError('VERSION_NOT_FOUND', `Session ${session.id} has no version ${versionId}`);
         }
     }

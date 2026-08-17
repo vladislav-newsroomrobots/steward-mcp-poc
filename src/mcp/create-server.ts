@@ -18,12 +18,20 @@ const INSTRUCTIONS = [
     'tools are the only way to read Steward data or update the open panel.',
     '',
     'Generating a document works like this, and you are the generator:',
-    '1. request_generation returns a brief — what to write, for whom, and how long.',
+    '1. request_generation returns a brief — what to write, for whom, how long and in what format.',
     '2. Do not stop after receiving the brief, and do not summarise it back to the user.',
     '3. Write the complete document yourself, respecting the instructions and word limit.',
-    '4. Call render_draft with the full text and the same sessionId.',
+    '4. Call render_draft with the full document and the same sessionId.',
     '5. Prefer render_draft over putting the document in your chat reply; the user',
     '   reads it in the panel. Keep the chat reply to one short sentence.',
+    '',
+    'Drafts are rich text in a small canonical subset of HTML — paragraphs, headings,',
+    'lists, blockquotes and basic emphasis. The panel renders it; a wall of plain text',
+    'loses the structure the document needs.',
+    '',
+    'After a draft exists, the user owns it: save_edit stores wording they supplied',
+    'themselves, submit_feedback records a rating and requires one of the product tags,',
+    'and the panel tracks copies. Never rate a draft on your own initiative.',
 ].join('\n');
 
 /**

@@ -52,8 +52,11 @@ export type DraftSource = 'gpt' | 'user' | 'fallback';
 export interface DraftVersion {
     id: string;
     source: DraftSource;
-    text: string;
+    /** Steward's canonical rich text — see `generation/canonical-html.ts`. */
+    html: string;
     createdAt: string;
+    /** For a manual edit: the version it was edited from. */
+    editedFrom?: string;
 }
 
 export type SessionStatus = 'idle' | 'generating' | 'ready' | 'failed';
@@ -69,6 +72,9 @@ export interface SessionEvent {
     kind: 'feedback' | 'copy';
     versionId: string;
     feedback?: FeedbackType;
+    /** Required with feedback: one of the eight product tags. */
+    tag?: string;
+    comment?: string;
     at: string;
 }
 

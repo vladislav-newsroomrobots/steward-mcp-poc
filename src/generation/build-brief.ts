@@ -1,4 +1,5 @@
 import type { Deal, DocumentType, Funder, GenerationBrief } from '../types/index.js';
+import { CANONICAL_FORMAT_HINT } from './canonical-html.js';
 
 interface BuildInput {
     documentType: DocumentType;
@@ -82,6 +83,10 @@ export function buildGenerationBrief({
         },
         constraints: {
             wordLimit,
+            // Stated in the brief as well as in the render_draft schema: the panel
+            // renders rich text, and a draft that arrives as one flat blob loses
+            // the paragraphs and lists the format exists for.
+            format: CANONICAL_FORMAT_HINT,
             ...(existingDraft === undefined
                 ? {}
                 : { revision: 'Revise the existing draft below rather than starting over.' }),

@@ -74,14 +74,21 @@ try {
     check('resource uses the MCP Apps mime type', doc?.mimeType === 'text/html;profile=mcp-app', doc?.mimeType);
     check('widget html is self-contained', typeof doc?.text === 'string' && doc.text.includes('<script type="module">'));
     check('widget has no external src', typeof doc?.text === 'string' && !/<script[^>]+src=/.test(doc.text));
-    // `$&` and "$`" in the bundle are substitution patterns for String.replace.
-    // Injecting the script with a string replacement silently splices the
-    // surrounding HTML into the JavaScript and breaks the whole widget.
-    check('script injection did not corrupt the bundle', !doc?.text?.includes('APP_SCRIPT'));
+    // The React app has one mount point; nothing renders without it.
+    check('widget carries its mount point', doc?.text?.includes('id="root"'));
+    // Every fetch the iframe cannot make: an asset Vite failed to inline renders
+    // the panel blank in the host and perfectly in a browser.
     check(
-        'stylesheet appears exactly once',
-        (doc?.text?.split('color-scheme: light dark').length ?? 0) - 1 === 1,
-        (doc?.text?.split('color-scheme: light dark').length ?? 0) - 1,
+        'no external references survive',
+        [...(doc?.text?.matchAll(/\s(?:src|href)="([^"]*)"/g) ?? [])].every(
+            ([, value]) => value.startsWith('data:') || value.startsWith('#'),
+        ),
+        [...(doc?.text?.matchAll(/\s(?:src|href)="([^"]*)"/g) ?? [])].map(([, value]) => value.slice(0, 40)),
+    );
+    check(
+        'stylesheet is inlined exactly once',
+        (doc?.text?.match(/<style/g)?.length ?? 0) === 1,
+        doc?.text?.match(/<style/g)?.length,
     );
 
     console.log('\nTool visibility');
@@ -89,12 +96,27 @@ try {
     check('render_draft is model-only', JSON.stringify(visibility.render_draft) === '["model"]', visibility.render_draft);
     check('get_session is app-only', JSON.stringify(visibility.get_session) === '["app"]', visibility.get_session);
     check('create_session is app-only', JSON.stringify(visibility.create_session) === '["app"]', visibility.create_session);
+    check('track_copy is app-only', JSON.stringify(visibility.track_copy) === '["app"]', visibility.track_copy);
+    // The user can hand over their own wording, or rate a draft, in chat as well
+    // as in the panel — both tools answer to both callers.
+    check(
+        'save_edit is visible to both',
+        JSON.stringify(visibility.save_edit) === '["model","app"]',
+        visibility.save_edit,
+    );
+    check(
+        'submit_feedback is visible to both',
+        JSON.stringify(visibility.submit_feedback) === '["model","app"]',
+        visibility.submit_feedback,
+    );
 
     console.log('\nWorkspace fixtures');
     const ws = (await client.callTool({ name: 'get_workspace', arguments: {} })).structuredContent;
     check('document types load', ws?.documentTypes?.length >= 3, ws?.documentTypes?.length);
     check('funders load', ws?.funders?.length >= 5, ws?.funders?.length);
     check('document types carry tips', ws?.documentTypes?.every(t => t.tips?.length > 0));
+    // The panel requires one tag per rating, so it has to be told the tags.
+    check('feedback tags are served', ws?.feedbackTags?.like?.length === 4 && ws?.feedbackTags?.dislike?.length === 4, ws?.feedbackTags);
     // systemInstructions are prompt material the server injects, not something
     // the model should read back or paraphrase.
     check('systemInstructions are not exposed', ws?.documentTypes?.every(t => t.systemInstructions === undefined));
@@ -159,13 +181,51 @@ try {
     const generating = await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } });
     check('session is generating', generating.structuredContent?.status === 'generating', generating.structuredContent);
 
-    const draftText = 'Dear Acme Foundation, thank you for supporting our education programme.';
-    await client.callTool({ name: 'render_draft', arguments: { sessionId: generationSessionId, text: draftText } });
+    check(
+        'brief states the draft format',
+        typeof generationBrief?.constraints?.format === 'string' &&
+            generationBrief.constraints.format.includes('<blockquote>'),
+        generationBrief?.constraints?.format,
+    );
+
+    // What a model actually sends: the canonical subset, plus the odd stray tag
+    // and a script it should never have produced.
+    const draftHtml =
+        '<p>Dear <strong>Acme Foundation</strong>, thank you for supporting our education programme.</p>' +
+        '<script>alert(1)</script><div class="signature" style="color:red">Riverside Chronicle</div>';
+    const rendered = await client.callTool({
+        name: 'render_draft',
+        arguments: { sessionId: generationSessionId, html: draftHtml },
+    });
+    check('render_draft counts the words', rendered.structuredContent?.words === 12, rendered.structuredContent?.words);
 
     const ready = await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } });
-    check('session is ready', ready.structuredContent?.status === 'ready', ready.structuredContent);
-    check('draft is stored', ready.structuredContent?.latestDraft === draftText);
+    const storedDraft = ready.structuredContent?.latestDraft;
+    check('session is ready', ready.structuredContent?.status === 'ready', ready.structuredContent?.status);
     check('one version exists', ready.structuredContent?.versionCount === 1, ready.structuredContent?.versionCount);
+    check('draft keeps its canonical markup', storedDraft?.startsWith('<p>Dear <strong>Acme Foundation</strong>'), storedDraft);
+    check('script content is dropped', !storedDraft?.includes('alert(1)'), storedDraft);
+    check('unknown wrappers become paragraphs', storedDraft?.includes('<p>Riverside Chronicle</p>'), storedDraft);
+    check('attributes are stripped', !/class=|style=/.test(storedDraft ?? ''), storedDraft);
+    check(
+        'versions are served to the panel',
+        ready.structuredContent?.versions?.[0]?.html === storedDraft &&
+            ready.structuredContent.versions[0].source === 'gpt' &&
+            ready.structuredContent.versions[0].copyCount === 0,
+        ready.structuredContent?.versions?.[0],
+    );
+
+    const emptyDraft = await client.callTool({
+        name: 'render_draft',
+        arguments: { sessionId: generationSessionId, html: '<div><span> </span></div>' },
+    });
+    check('a draft with no content is an MCP error', emptyDraft.isError === true, emptyDraft.isError);
+
+    const noDocument = await client.callTool({
+        name: 'render_draft',
+        arguments: { sessionId: generationSessionId },
+    });
+    check('render_draft without a document is an MCP error', noDocument.isError === true, noDocument.isError);
 
     console.log('\nRefinement');
     const refine = await client.callTool({
@@ -174,7 +234,7 @@ try {
     });
     check(
         'refinement brief includes the current draft',
-        refine.structuredContent?.generationBrief?.existingDraft === draftText,
+        refine.structuredContent?.generationBrief?.existingDraft === storedDraft,
         refine.structuredContent?.generationBrief?.existingDraft,
     );
     check(
@@ -184,10 +244,119 @@ try {
 
     await client.callTool({
         name: 'render_draft',
-        arguments: { sessionId: generationSessionId, text: `${draftText} We are grateful.` },
+        arguments: { sessionId: generationSessionId, html: `${storedDraft}<p>We are grateful.</p>` },
     });
     const refined = await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } });
     check('two versions exist', refined.structuredContent?.versionCount === 2, refined.structuredContent?.versionCount);
+
+    // A host that scanned the tool list before `text` was renamed to `html` would
+    // otherwise fail schema validation inside the SDK — silently, from the
+    // server's point of view, and indistinguishably from a model that never
+    // answered at all. Checked on a session of its own so it cannot disturb the
+    // version counts above.
+    console.log('\nStale tool lists');
+    const legacySessionId = (await client.callTool({ name: 'create_session', arguments: inputs }))
+        .structuredContent?.sessionId;
+    const legacyArgument = await client.callTool({
+        name: 'render_draft',
+        arguments: { sessionId: legacySessionId, text: 'Written by a caller with a stale tool list.' },
+    });
+    check('the legacy text parameter still works', legacyArgument.isError !== true, legacyArgument.content?.[0]?.text);
+
+    const legacySession = (await client.callTool({ name: 'get_session', arguments: { sessionId: legacySessionId } }))
+        .structuredContent;
+    check(
+        'a plain-text draft is wrapped in paragraphs',
+        legacySession?.latestDraft === '<p>Written by a caller with a stale tool list.</p>',
+        legacySession?.latestDraft,
+    );
+
+    console.log('\nDraft lifecycle');
+    const secondVersionId = refined.structuredContent?.versions?.at(-1)?.id;
+
+    const unchanged = await client.callTool({
+        name: 'save_edit',
+        arguments: { sessionId: generationSessionId, html: refined.structuredContent.latestDraft },
+    });
+    check('an edit that changes nothing creates no version', unchanged.structuredContent?.unchanged === true, unchanged.structuredContent);
+
+    const edited = await client.callTool({
+        name: 'save_edit',
+        arguments: {
+            sessionId: generationSessionId,
+            html: '<p>Dear <b>Acme Foundation</b> — my own wording.</p>',
+            editedFrom: secondVersionId,
+        },
+    });
+    check('a real edit creates a version', edited.structuredContent?.versionCount === 3, edited.structuredContent);
+
+    const afterEdit = (await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } }))
+        .structuredContent;
+    const userVersion = afterEdit?.versions?.at(-1);
+    check('the edit is attributed to the user', userVersion?.source === 'user', userVersion?.source);
+    check('the edit records what it came from', userVersion?.editedFrom === secondVersionId, userVersion?.editedFrom);
+    check('presentational tags are normalised', userVersion?.html?.includes('<strong>Acme Foundation</strong>'), userVersion?.html);
+
+    const feedback = await client.callTool({
+        name: 'submit_feedback',
+        arguments: {
+            sessionId: generationSessionId,
+            versionId: secondVersionId,
+            feedback: 'like',
+            tag: 'Used my context well',
+        },
+    });
+    check('feedback is recorded', feedback.structuredContent?.tag === 'Used my context well', feedback.structuredContent);
+
+    const duplicate = await client.callTool({
+        name: 'submit_feedback',
+        arguments: { sessionId: generationSessionId, versionId: secondVersionId, feedback: 'like', tag: 'Too generic' },
+    });
+    check('a second rating on the same version is rejected', duplicate.isError === true);
+
+    const badTag = await client.callTool({
+        name: 'submit_feedback',
+        arguments: { sessionId: generationSessionId, versionId: userVersion?.id, feedback: 'like', tag: 'Too generic' },
+    });
+    // "Too generic" is a dislike tag; a mismatched pair would poison the analytics
+    // the tags exist for.
+    check('a tag from the other rating is rejected', badTag.isError === true);
+    check(
+        'the rejection carries its error code',
+        badTag.content?.[0]?.text?.includes('INVALID_FEEDBACK_TAG'),
+        badTag.content?.[0]?.text,
+    );
+
+    const unknownVersion = await client.callTool({
+        name: 'submit_feedback',
+        arguments: {
+            sessionId: generationSessionId,
+            versionId: 'not-a-version',
+            feedback: 'like',
+            tag: 'Clear impact + metrics',
+        },
+    });
+    check('feedback on an unknown version is rejected', unknownVersion.isError === true);
+
+    const copied = await client.callTool({
+        name: 'track_copy',
+        arguments: { sessionId: generationSessionId, versionId: userVersion?.id },
+    });
+    check('a copy is counted', copied.structuredContent?.copyCount === 1, copied.structuredContent);
+
+    const withEvents = (await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } }))
+        .structuredContent;
+    check('events reach the panel', withEvents?.eventCount === 2, withEvents?.eventCount);
+    check(
+        'the rated version carries its tag',
+        withEvents?.versions?.find(v => v.id === secondVersionId)?.feedbackTag === 'Used my context well',
+        withEvents?.versions?.map(v => v.feedbackTag),
+    );
+    check(
+        'the copied version carries its count',
+        withEvents?.versions?.find(v => v.id === userVersion?.id)?.copyCount === 1,
+        withEvents?.versions?.map(v => v.copyCount),
+    );
 
     console.log('\nGeneration errors');
     const unknownSessionCall = await client.callTool({
@@ -196,33 +365,31 @@ try {
     });
     check('unknown session is an MCP error', unknownSessionCall.isError === true, unknownSessionCall.isError);
 
-    // Exercised directly: the tools that expose these land in stage 5, and
-    // shipping the store untested until then invites a nasty surprise.
-    console.log('\nSession store events');
+    // The panel edits rich text through `contenteditable`, which rewrites its own
+    // markup as the user types. Only a change to the words is a new version.
+    console.log('\nEdit normalisation');
     const { sessionStore } = await import('../dist/store/session-store.js');
     const s = sessionStore.create({});
-    sessionStore.addVersion(s.id, 'First draft text.', 'gpt');
-    const v1 = s.versions.at(-1);
+    sessionStore.addVersion(s.id, '<p>First draft text.</p>', 'gpt');
 
-    sessionStore.saveEdit(s.id, '  First   draft text.  ');
-    check('whitespace-only edit creates no version', s.versions.length === 1, s.versions.length);
+    sessionStore.saveEdit(s.id, '<p>First   draft text.<br></p>');
+    check('reflowed markup creates no version', s.versions.length === 1, s.versions.length);
 
-    sessionStore.saveEdit(s.id, 'First draft text, edited.');
-    check('a real edit creates a version', s.versions.length === 2, s.versions.length);
-    check('edited version is attributed to the user', s.versions.at(-1).source === 'user');
+    sessionStore.saveEdit(s.id, '<p>First draft text, edited.</p>');
+    check('changed wording creates a version', s.versions.length === 2, s.versions.length);
 
-    sessionStore.addFeedback(s.id, v1.id, 'like');
-    sessionStore.addCopyEvent(s.id, v1.id);
-    check('events are recorded', s.events.length === 2, s.events.length);
-    check('feedback carries its type', s.events[0].feedback === 'like', s.events[0]);
+    // A generation that misses its deadline is not a generation that can never
+    // land: the model may answer late, and the panel's "Check again" button is
+    // worth nothing if the server has already closed the door.
+    console.log('\nLate drafts');
+    const late = sessionStore.create({});
+    late.status = 'failed';
+    late.failureReason = 'GENERATION_TIMEOUT';
 
-    let rejected = false;
-    try {
-        sessionStore.addFeedback(s.id, 'not-a-version', 'like');
-    } catch {
-        rejected = true;
-    }
-    check('feedback on an unknown version is rejected', rejected);
+    sessionStore.addVersion(late.id, '<p>Arrived late.</p>', 'gpt');
+    check('a late draft is accepted', late.versions.length === 1, late.versions.length);
+    check('a late draft revives the session', late.status === 'ready', late.status);
+    check('the failure reason is cleared', late.failureReason === undefined, late.failureReason);
 
     console.log('\nFallback drafts');
     const { workspace } = await import('../dist/data/workspace.js');
