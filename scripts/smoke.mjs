@@ -90,11 +90,42 @@ try {
     check('get_session is app-only', JSON.stringify(visibility.get_session) === '["app"]', visibility.get_session);
     check('create_session is app-only', JSON.stringify(visibility.create_session) === '["app"]', visibility.create_session);
 
+    console.log('\nWorkspace fixtures');
+    const ws = (await client.callTool({ name: 'get_workspace', arguments: {} })).structuredContent;
+    check('document types load', ws?.documentTypes?.length >= 3, ws?.documentTypes?.length);
+    check('funders load', ws?.funders?.length >= 5, ws?.funders?.length);
+    check('document types carry tips', ws?.documentTypes?.every(t => t.tips?.length > 0));
+    // systemInstructions are prompt material the server injects, not something
+    // the model should read back or paraphrase.
+    check('systemInstructions are not exposed', ws?.documentTypes?.every(t => t.systemInstructions === undefined));
+
+    const funderId = ws.funders[0].id;
+    const documentTypeId = ws.documentTypes[0].id;
+
+    const linked = (await client.callTool({ name: 'get_linked_objects', arguments: { funderId } }))
+        .structuredContent;
+    check('funder has opportunities', linked?.opportunities?.length > 0, linked?.opportunities?.length);
+    check('opportunities carry a stage', linked.opportunities.every(o => typeof o.stage === 'string'));
+
+    const badFunder = await client.callTool({ name: 'get_linked_objects', arguments: { funderId: 'nope' } });
+    check('unknown funder is an MCP error', badFunder.isError === true);
+
+    // Fixtures are hand-maintained JSON, so nothing but this stops a deal from
+    // pointing at a funder that no longer exists.
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const allFunders = req('../fixtures/funders.json');
+    const allDeals = req('../fixtures/deals.json');
+    const dangling = allDeals.filter(d => !allFunders.some(f => f.id === d.funderId));
+    check('every deal resolves to a funder', dangling.length === 0, dangling.map(d => d.title));
+    check('every funder has at least one deal', allFunders.every(f => allDeals.some(d => d.funderId === f.id)));
+
     console.log('\nGeneration cycle');
     const inputs = {
-        documentType: 'Thank-you letter',
-        funder: 'Acme Foundation',
-        userRequest: 'Mention the education programme.',
+        documentTypeId,
+        funderId,
+        dealId: linked.opportunities[0].id,
+        userRequest: 'Mention the county-government desk.',
         wordLimit: 300,
     };
 
@@ -107,9 +138,19 @@ try {
         arguments: { sessionId: generationSessionId, ...inputs, variant: 'ui-tool-call' },
     });
     const generationBrief = brief.structuredContent?.generationBrief;
-    check('request_generation returns a brief', generationBrief?.funder === 'Acme Foundation', generationBrief);
-    check('brief carries the word limit', generationBrief?.wordLimit === 300, generationBrief?.wordLimit);
+    check('request_generation returns a brief', generationBrief?.funder === ws.funders[0].name, generationBrief?.funder);
+    check('brief carries the word limit', generationBrief?.constraints?.wordLimit === 300, generationBrief?.constraints);
     check('first brief has no existing draft', generationBrief?.existingDraft === undefined);
+    check(
+        'brief uses the document type systemInstructions',
+        typeof generationBrief?.instructions === 'string' && generationBrief.instructions.length > 200,
+        generationBrief?.instructions?.length,
+    );
+    check('brief carries funder context', generationBrief?.context?.funder?.funderType !== undefined, generationBrief?.context?.funder);
+    check('brief carries opportunity context', generationBrief?.context?.opportunity?.stage !== undefined, generationBrief?.context?.opportunity);
+    // The CRM export is mostly plumbing; only fields a fundraiser would use
+    // belong in the brief.
+    check('brief omits CRM plumbing', generationBrief?.context?.funder?.sourceSystem === undefined);
     check(
         'result tells the model to continue',
         typeof brief.structuredContent?.nextStep === 'string' && brief.structuredContent.nextStep.includes('render_draft'),
@@ -138,7 +179,7 @@ try {
     );
     check(
         'omitted fields fall back to the session',
-        refine.structuredContent?.generationBrief?.funder === 'Acme Foundation',
+        refine.structuredContent?.generationBrief?.funder === ws.funders[0].name,
     );
 
     await client.callTool({
@@ -154,6 +195,42 @@ try {
         arguments: { sessionId: 'does-not-exist' },
     });
     check('unknown session is an MCP error', unknownSessionCall.isError === true, unknownSessionCall.isError);
+
+    // Exercised directly: the tools that expose these land in stage 5, and
+    // shipping the store untested until then invites a nasty surprise.
+    console.log('\nSession store events');
+    const { sessionStore } = await import('../dist/store/session-store.js');
+    const s = sessionStore.create({});
+    sessionStore.addVersion(s.id, 'First draft text.', 'gpt');
+    const v1 = s.versions.at(-1);
+
+    sessionStore.saveEdit(s.id, '  First   draft text.  ');
+    check('whitespace-only edit creates no version', s.versions.length === 1, s.versions.length);
+
+    sessionStore.saveEdit(s.id, 'First draft text, edited.');
+    check('a real edit creates a version', s.versions.length === 2, s.versions.length);
+    check('edited version is attributed to the user', s.versions.at(-1).source === 'user');
+
+    sessionStore.addFeedback(s.id, v1.id, 'like');
+    sessionStore.addCopyEvent(s.id, v1.id);
+    check('events are recorded', s.events.length === 2, s.events.length);
+    check('feedback carries its type', s.events[0].feedback === 'like', s.events[0]);
+
+    let rejected = false;
+    try {
+        sessionStore.addFeedback(s.id, 'not-a-version', 'like');
+    } catch {
+        rejected = true;
+    }
+    check('feedback on an unknown version is rejected', rejected);
+
+    console.log('\nFallback drafts');
+    const { workspace } = await import('../dist/data/workspace.js');
+    const exact = workspace.fallbackDraft('dt-thank-you-letter', 'recfbSXdGVStsacWl');
+    check('exact fallback matches', exact?.documentTypeId === 'dt-thank-you-letter', exact?.documentTypeId);
+    const generic = workspace.fallbackDraft('dt-grant-report', 'no-such-funder');
+    check('falls back to the generic draft', generic?.documentTypeId === '*', generic?.documentTypeId);
+    check('fallback drafts have real text', (generic?.text?.length ?? 0) > 400, generic?.text?.length);
 
     console.log('\nSpike metrics');
     const stats = await (await fetch(`${baseUrl}/stats`)).json();

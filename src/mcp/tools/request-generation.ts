@@ -2,6 +2,7 @@ import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
+import { workspace } from '../../data/workspace.js';
 import { StewardError } from '../../errors.js';
 import { buildGenerationBrief } from '../../generation/build-brief.js';
 import { runLog } from '../../store/run-log.js';
@@ -41,8 +42,9 @@ export function registerRequestGenerationTool(server: McpServer): void {
                 'Returns the generation brief for a Steward session: what to write, for whom, in what voice, and how long. Call it when the user asks for a document, then immediately write that document and pass it to render_draft. This tool does not generate anything by itself — you are the generator.',
             inputSchema: {
                 sessionId: z.string(),
-                documentType: z.string().optional(),
-                funder: z.string().optional(),
+                documentTypeId: z.string().optional(),
+                funderId: z.string().optional(),
+                dealId: z.string().optional(),
                 userRequest: z.string().optional(),
                 wordLimit: z.number().int().positive().max(5000).optional(),
                 variant: z
@@ -57,8 +59,9 @@ export function registerRequestGenerationTool(server: McpServer): void {
                     documentType: z.string(),
                     funder: z.string(),
                     instructions: z.string(),
+                    context: z.record(z.unknown()),
+                    constraints: z.record(z.unknown()),
                     userRequest: z.string(),
-                    wordLimit: z.number(),
                     existingDraft: z.string().optional(),
                 }),
                 nextStep: z.string(),
@@ -74,8 +77,8 @@ export function registerRequestGenerationTool(server: McpServer): void {
             // dropped field would otherwise fail the attempt for reasons that
             // have nothing to do with the orchestration being measured.
             const merged = {
-                documentType: input.documentType ?? session.inputs.documentType,
-                funder: input.funder ?? session.inputs.funder,
+                documentTypeId: input.documentTypeId ?? session.inputs.documentTypeId,
+                funderId: input.funderId ?? session.inputs.funderId,
                 userRequest: input.userRequest ?? session.inputs.userRequest,
                 wordLimit: input.wordLimit ?? session.inputs.wordLimit,
             };
@@ -91,11 +94,27 @@ export function registerRequestGenerationTool(server: McpServer): void {
                 );
             }
 
-            const inputs = merged as SessionInputs;
+            const dealId = input.dealId ?? session.inputs.dealId;
+            const inputs: SessionInputs = {
+                ...(merged as Omit<SessionInputs, 'dealId'>),
+                ...(dealId === undefined ? {} : { dealId }),
+            };
+
+            // Unknown ids throw here, before a run is recorded — a bad id is a
+            // caller error, not a failed generation attempt, and counting it as
+            // one would corrupt the reliability metric.
+            const documentType = workspace.documentType(inputs.documentTypeId);
+            const funder = workspace.funder(inputs.funderId);
+            const deal = inputs.dealId === undefined ? undefined : workspace.deal(inputs.dealId);
+
             const existingDraft = session.versions.at(-1)?.text;
 
             const generationBrief = buildGenerationBrief({
-                ...inputs,
+                documentType,
+                funder,
+                ...(deal === undefined ? {} : { deal }),
+                userRequest: inputs.userRequest,
+                wordLimit: inputs.wordLimit,
                 ...(existingDraft === undefined ? {} : { existingDraft }),
             });
 
@@ -104,7 +123,7 @@ export function registerRequestGenerationTool(server: McpServer): void {
             const run = runLog.start({
                 sessionId: session.id,
                 variant: input.variant ?? 'conversation',
-                documentType: inputs.documentType,
+                documentType: documentType.name,
                 wordLimit: inputs.wordLimit,
                 isRefinement: existingDraft !== undefined,
             });

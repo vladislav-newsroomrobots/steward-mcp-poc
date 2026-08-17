@@ -144,6 +144,25 @@
                 gap: 12px;
             }
 
+            /* The document type's writing tips — the detail the extension
+               buried in a settings panel, surfaced here where it is useful. */
+            .tips {
+                margin: -4px 0 12px;
+                padding: 10px 12px 10px 26px;
+                border-radius: 8px;
+                background: var(--code-bg);
+                font-size: 12.5px;
+                line-height: 1.45;
+                color: var(--muted);
+                display: flex;
+                flex-direction: column;
+                gap: 5px;
+            }
+
+            .tips:empty {
+                display: none;
+            }
+
             .row > * {
                 flex: 1;
             }
@@ -209,20 +228,27 @@
             <!-- Inputs are never gated on the host handshake: a broken script
                  must not look like dead HTML. Only the actions are. -->
             <fieldset id="form">
+                <label
+                    >Document type
+                    <select id="documentType"></select>
+                </label>
+
+                <ul class="tips" id="tips"></ul>
+
                 <div class="row">
                     <label
-                        >Document type
-                        <input id="documentType" type="text" value="Thank-you letter" />
+                        >Funder
+                        <select id="funder"></select>
                     </label>
                     <label
-                        >Funder
-                        <input id="funder" type="text" value="Acme Foundation" />
+                        >Opportunity
+                        <select id="deal"></select>
                     </label>
                 </div>
 
                 <label
                     >Request
-                    <textarea id="userRequest" placeholder="Mention the education programme and the site visit in March."></textarea>
+                    <textarea id="userRequest" placeholder="Thank her for the first gift and mention the county-government desk."></textarea>
                 </label>
 
                 <div class="row">

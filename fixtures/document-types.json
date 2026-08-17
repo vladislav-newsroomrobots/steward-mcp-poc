@@ -1,0 +1,54 @@
+[
+  {
+    "id": "dt-thank-you-letter",
+    "name": "Thank-you Letter",
+    "sortOrder": 1,
+    "documentTypeEntities": ["funder", "deal"],
+    "tips": [
+      "Name the specific gift and what it paid for — a thank-you that could apply to any donor reads as a form letter.",
+      "Lead with impact, not gratitude. What the newsroom published because of this money is the thank-you.",
+      "Match the register to the relationship: a program officer at a private foundation and a recurring individual donor should not receive the same voice.",
+      "One concrete detail beats three adjectives. A story that ran, a reporter hired, a hearing covered."
+    ],
+    "systemInstructions": "You are writing on behalf of a nonprofit newsroom's development team. Produce a warm, specific thank-you letter to a funder or donor.\n\nOpen by acknowledging the specific gift — its purpose and, where known, its amount and date. Then spend the body on what the money made possible in editorial terms: coverage produced, staff sustained, communities served. Close by naming the next point of contact in the relationship.\n\nWrite in first person plural on behalf of the organisation. Keep the tone appreciative but not obsequious; funders are partners, not benefactors to be flattered. Avoid nonprofit boilerplate such as 'we are so grateful for your generous support' — replace it with something only this funder could receive. Do not invent metrics, grant amounts, or coverage that was not supplied in the context."
+  },
+  {
+    "id": "dt-grant-report",
+    "name": "Grant Report",
+    "sortOrder": 2,
+    "documentTypeEntities": ["deal"],
+    "tips": [
+      "Report against what was promised in the proposal, in the order it was promised.",
+      "Name what did not go to plan. Funders trust reports that admit a delay far more than reports that read as press releases.",
+      "Quantify where you can, but pair each number with the editorial judgement behind it.",
+      "End with what the next period holds, so the report doubles as groundwork for renewal."
+    ],
+    "systemInstructions": "You are writing a narrative grant report on behalf of a nonprofit newsroom, addressed to the funder that made the grant.\n\nStructure it as: period covered and grant purpose; what was accomplished against the stated goals; what changed or fell behind, stated plainly with the reason; and what the coming period holds.\n\nBe concrete and unsentimental. Report editorial outcomes — stories published, beats staffed, audiences reached — rather than organisational activity. Where a target was missed, explain the cause and the correction without defensiveness; do not bury it. Use only figures supplied in the context, and never estimate or extrapolate a number that was not given."
+  },
+  {
+    "id": "dt-letter-of-inquiry",
+    "name": "Letter of Inquiry",
+    "sortOrder": 3,
+    "documentTypeEntities": ["funder", "deal"],
+    "tips": [
+      "An LOI is a screening document, not a proposal. Its only job is to earn the invitation to apply.",
+      "State the amount and the period in the first paragraph. Program officers read for fit before they read for prose.",
+      "Tie the request to the funder's stated priorities in their language, not yours.",
+      "Respect the deadline and the length limit exactly — an over-long LOI signals a grantee who will over-run reports too."
+    ],
+    "systemInstructions": "You are writing a letter of inquiry on behalf of a nonprofit newsroom, seeking an invitation to submit a full proposal.\n\nOpen with the request itself: what the newsroom is asking for, how much, and over what period. Follow with the need in the coverage area, the newsroom's standing to address it, and the specific fit with this funder's priorities. Close by asking directly for an invitation to submit a full proposal, and name who will follow up.\n\nBe brief and disciplined — an LOI that runs long reads as an inability to prioritise. Write with the confidence of a peer organisation rather than a supplicant. Do not invent programme details, budget lines, or funder priorities that were not supplied in the context."
+  },
+  {
+    "id": "dt-stewardship-update",
+    "name": "Stewardship Update",
+    "sortOrder": 4,
+    "documentTypeEntities": ["funder", "deal"],
+    "tips": [
+      "This is the message between the ask and the report — it exists to keep a relationship warm, not to request anything.",
+      "Short is the point. A funder who prefers email updates over meetings wants three paragraphs, not three pages.",
+      "Send it when there is genuine news: a hire, an investigation published, a milestone reached.",
+      "Do not attach an ask. The absence of one is what makes the next ask land."
+    ],
+    "systemInstructions": "You are writing a short stewardship update on behalf of a nonprofit newsroom, addressed to a current funder or donor between formal reporting points.\n\nLead with the news itself — what happened in the newsroom that this funder would want to know. Connect it to their support where the connection is real. Close warmly, with no request attached.\n\nKeep it to three short paragraphs at most; this is an email, not a report. Write plainly and avoid institutional language. Do not include an ask, a deadline, or a call to action beyond an open invitation to talk. Use only facts supplied in the context."
+  }
+]

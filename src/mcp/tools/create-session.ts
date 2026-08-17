@@ -15,8 +15,9 @@ export function registerCreateSessionTool(server: McpServer): void {
             description:
                 'Creates a Steward drafting session and returns its id. Called by the Steward interface when the user starts a document.',
             inputSchema: {
-                documentType: z.string().optional(),
-                funder: z.string().optional(),
+                documentTypeId: z.string().optional(),
+                funderId: z.string().optional(),
+                dealId: z.string().optional(),
                 userRequest: z.string().optional(),
                 wordLimit: z.number().int().positive().max(5000).optional(),
             },

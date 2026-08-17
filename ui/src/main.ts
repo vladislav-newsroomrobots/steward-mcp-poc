@@ -22,13 +22,24 @@ const generateButton = el<HTMLButtonElement>('generate');
 const resetButton = el<HTMLButtonElement>('reset');
 const pingButton = el<HTMLButtonElement>('ping');
 
+const tipsEl = el('tips');
+
 const fields = {
-    documentType: el<HTMLInputElement>('documentType'),
-    funder: el<HTMLInputElement>('funder'),
+    documentType: el<HTMLSelectElement>('documentType'),
+    funder: el<HTMLSelectElement>('funder'),
+    deal: el<HTMLSelectElement>('deal'),
     userRequest: el<HTMLTextAreaElement>('userRequest'),
     wordLimit: el<HTMLInputElement>('wordLimit'),
     variant: el<HTMLSelectElement>('variant'),
 };
+
+interface DocumentTypeOption {
+    id: string;
+    name: string;
+    tips: string[];
+}
+
+let documentTypes: DocumentTypeOption[] = [];
 
 // Registered before anything else can throw, so a broken bundle reports itself
 // in the panel instead of leaving the widget looking like inert HTML.
@@ -62,11 +73,53 @@ function describeError(error: unknown): string {
 
 function readInputs() {
     return {
-        documentType: fields.documentType.value.trim(),
-        funder: fields.funder.value.trim(),
+        documentTypeId: fields.documentType.value,
+        funderId: fields.funder.value,
+        ...(fields.deal.value === '' ? {} : { dealId: fields.deal.value }),
         userRequest: fields.userRequest.value.trim(),
         wordLimit: Number(fields.wordLimit.value),
     };
+}
+
+function fillSelect(
+    select: HTMLSelectElement,
+    options: Array<{ value: string; label: string }>,
+    placeholder?: string,
+): void {
+    select.replaceChildren(
+        ...(placeholder === undefined ? [] : [new Option(placeholder, '')]),
+        ...options.map(option => new Option(option.label, option.value)),
+    );
+}
+
+function showTips(documentTypeId: string): void {
+    const tips = documentTypes.find(type => type.id === documentTypeId)?.tips ?? [];
+
+    tipsEl.replaceChildren(
+        ...tips.map(tip => {
+            const li = document.createElement('li');
+            li.textContent = tip;
+            return li;
+        }),
+    );
+}
+
+/** Opportunities belong to a funder, so they load only once one is chosen. */
+async function loadDeals(funderId: string): Promise<void> {
+    if (!funderId) {
+        fillSelect(fields.deal, [], 'No funder selected');
+        return;
+    }
+
+    const { opportunities } = await callTool<{
+        opportunities: Array<{ id: string; title: string; stage?: string }>;
+    }>('get_linked_objects', { funderId });
+
+    fillSelect(
+        fields.deal,
+        opportunities.map(o => ({ value: o.id, label: o.stage ? `${o.title} · ${o.stage}` : o.title })),
+        opportunities.length > 0 ? 'None' : 'No linked opportunities',
+    );
 }
 
 async function callTool<T>(name: string, args: Record<string, unknown>): Promise<T> {
@@ -153,7 +206,7 @@ function pollSession(id: string, startedAt: number): void {
 async function generate(): Promise<void> {
     const inputs = readInputs();
 
-    if (!inputs.documentType || !inputs.funder || !inputs.userRequest) {
+    if (!inputs.documentTypeId || !inputs.funderId || !inputs.userRequest) {
         setStatus('error', 'Fill in the fields');
         setMeta('Document type, funder and request are all required.');
         return;
@@ -183,8 +236,9 @@ async function generate(): Promise<void> {
                         text: [
                             'Steward request — please handle this now.',
                             `sessionId: ${id}`,
-                            `Document type: ${inputs.documentType}`,
-                            `Funder: ${inputs.funder}`,
+                            `documentTypeId: ${inputs.documentTypeId}`,
+                            `funderId: ${inputs.funderId}`,
+                            ...(inputs.dealId === undefined ? [] : [`dealId: ${inputs.dealId}`]),
                             `Word limit: ${inputs.wordLimit}`,
                             `Request: ${inputs.userRequest}`,
                             '',
@@ -205,6 +259,23 @@ async function generate(): Promise<void> {
 }
 
 generateButton.addEventListener('click', () => void generate());
+
+fields.documentType.addEventListener('change', () => showTips(fields.documentType.value));
+
+fields.funder.addEventListener('change', () => {
+    void (async () => {
+        // A stale opportunity from the previous funder would silently poison
+        // the brief, so clear before loading rather than after.
+        fillSelect(fields.deal, [], 'Loading…');
+
+        try {
+            await loadDeals(fields.funder.value);
+        } catch (error) {
+            fillSelect(fields.deal, [], 'Could not load opportunities');
+            setMeta(describeError(error));
+        }
+    })();
+});
 
 resetButton.addEventListener('click', () => {
     stopPolling();
@@ -240,6 +311,25 @@ try {
     const host = app.getHostVersion();
     setStatus('connected', 'Connected');
     setMeta(host ? `host: ${host.name} ${host.version}` : 'host: unknown');
+
+    const ws = await callTool<{
+        documentTypes: DocumentTypeOption[];
+        funders: Array<{ id: string; name: string; lastGrantAmount?: string }>;
+    }>('get_workspace', {});
+
+    documentTypes = ws.documentTypes;
+    fillSelect(fields.documentType, documentTypes.map(t => ({ value: t.id, label: t.name })));
+    fillSelect(
+        fields.funder,
+        ws.funders.map(f => ({
+            value: f.id,
+            label: f.lastGrantAmount ? `${f.name} · ${f.lastGrantAmount}` : f.name,
+        })),
+        'Select a funder',
+    );
+    fillSelect(fields.deal, [], 'No funder selected');
+    showTips(fields.documentType.value);
+
     generateButton.disabled = false;
     resetButton.disabled = false;
     pingButton.disabled = false;

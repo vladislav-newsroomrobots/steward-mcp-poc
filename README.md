@@ -201,6 +201,8 @@ itself needs no change.
 | Name | Visible to | Purpose |
 |---|---|---|
 | `open_steward` | model, app | entry point; renders `ui://steward/app.html` in the conversation |
+| `get_workspace` | model, app | document types and funders; resolves a name the user said into an id |
+| `get_linked_objects` | model, app | the opportunities linked to a funder |
 | `request_generation` | model, app | returns the generation brief the model writes from |
 | `render_draft` | model | stores the document the model wrote and shows it in the panel |
 | `create_session` | app | opens a drafting session |
@@ -211,6 +213,34 @@ itself needs no change.
 Visibility comes from `_meta.ui.visibility`. Session plumbing is hidden from the
 model so it cannot wander into it, and `render_draft` is hidden from the widget
 because only the model produces drafts.
+
+## Workspace data
+
+Fixtures are checked in as JSON under `fixtures/` and loaded once at startup.
+`test-data/` holds the CSV exports they were derived from, kept for reference.
+
+Shapes mirror the production contracts in the extension's `api-client.ts`
+(`UserDetailsResponse`, `LinkedOpportunity`) rather than the simplified ones in
+the stage plan, so phase 2 swaps the loader for real endpoints and leaves the
+tools and widget untouched.
+
+| File | Contents |
+|---|---|
+| `funders.json` | 11 funders with their full CRM payload under `raw` |
+| `deals.json` | 18 opportunities, joined to funders by `funderId` |
+| `document-types.json` | 4 types with `tips` and `systemInstructions` |
+| `drafts.json` | pre-written drafts for demo mode, `*` matches anything |
+
+Editing them is a matter of editing the JSON. The one invariant to keep is that
+every `deal.funderId` matches a funder `id` — nothing enforces it at build time.
+
+`systemInstructions` never reach the model through `get_workspace` — they are
+prompt material the server injects into the brief, not something to paraphrase.
+
+The `raw` payload carries every column of the export, most of it plumbing.
+`buildGenerationBrief` projects a curated subset into the brief: giving history,
+contact, funder type, notes, and the opportunity's stage, amounts and next step.
+Passing `raw` wholesale would bury the few facts that change the prose.
 
 ## The generation cycle
 
@@ -294,15 +324,19 @@ directly by the iframe.
 Stage 4 may swap esbuild for Vite + React; the output contract — a single
 `ui/dist/app.html` — stays the same.
 
-## Current state — stage 2
+## Current state — stage 3
 
-The full `request_generation → model writes → render_draft` cycle works, with
-refinement, both orchestration variants and reliability metrics. Data is still
-free text typed into the widget; fixtures, document-type tips and funder/deal
-pickers arrive in stage 3, and the real interface in stage 4.
+The full `request_generation → model writes → render_draft` cycle works on
+fixture data, with refinement, both orchestration variants and reliability
+metrics. Briefs now carry the document type's own instructions plus real funder
+and opportunity context, so draft quality reflects what the product would
+actually produce.
 
-The widget is a spike harness on purpose — plain fields and a variant switch,
-enough to run the matrix and watch the cycle complete.
+The widget has document type, funder and opportunity pickers and surfaces the
+writing tips, but it is still a spike harness rather than the real interface —
+that is stage 4. Manual editing, version history, feedback and copy tracking are
+stage 5; the session store already implements them and they are covered by the
+smoke check ahead of the tools that expose them.
 
 `npm run smoke` exercises the whole cycle server-side, standing in for the model.
 What it cannot check is whether a real host actually completes the cycle — that

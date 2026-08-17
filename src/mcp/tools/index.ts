@@ -1,7 +1,9 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { registerCreateSessionTool } from './create-session.js';
+import { registerGetLinkedObjectsTool } from './get-linked-objects.js';
 import { registerGetSessionTool } from './get-session.js';
+import { registerGetWorkspaceTool } from './get-workspace.js';
 import { registerOpenStewardTool } from './open-steward.js';
 import { registerPingTool } from './ping.js';
 import { registerRenderDraftTool } from './render-draft.js';
@@ -17,6 +19,8 @@ import { registerRequestGenerationTool } from './request-generation.js';
 export function registerTools(server: McpServer): void {
     registerPingTool(server);
     registerOpenStewardTool(server);
+    registerGetWorkspaceTool(server);
+    registerGetLinkedObjectsTool(server);
     registerCreateSessionTool(server);
     registerRequestGenerationTool(server);
     registerRenderDraftTool(server);
