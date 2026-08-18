@@ -12,6 +12,7 @@ import { withToolLogging } from '../with-tool-logging.js';
 
 interface RequestGenerationInput extends Partial<SessionInputs> {
     sessionId: string;
+    existingDraft?: string;
     variant?: OrchestrationVariant;
 }
 
@@ -23,13 +24,18 @@ interface RequestGenerationInput extends Partial<SessionInputs> {
  * the point is repeated in the server instructions, in the tool description and
  * again in this result, because a model that stops after the brief is the
  * single failure mode that breaks the product.
+ *
+ * The draft itself stays in the conversation — no tool takes it back. So the
+ * second half of the instruction is about pacing: write it, say it is ready,
+ * and print it only once the user asks.
  */
 const CONTINUATION_INSTRUCTION = [
     'Do not stop here, and do not describe this brief back to the user.',
-    'Write the complete document now, following the instructions and word limit above,',
-    'then call render_draft with the full text and the same sessionId.',
-    'Send the document through render_draft rather than writing it into the chat;',
-    'the user reads it in the Steward panel. Keep your chat reply to one short sentence.',
+    'Write the complete document now, following the instructions and word limit above.',
+    'Hold it back for the moment — no tool takes it, and the user reads it in this chat.',
+    'Then reply with one short sentence saying the draft is ready,',
+    'and ask whether they would like to see it.',
+    'Print the full document in your next reply, once they say yes.',
 ].join(' ');
 
 export function registerRequestGenerationTool(server: McpServer): void {
@@ -39,7 +45,7 @@ export function registerRequestGenerationTool(server: McpServer): void {
         {
             title: 'Request Steward generation',
             description:
-                'Returns the generation brief for a Steward session: what to write, for whom, in what voice, and how long. Call it when the user asks for a document, then immediately write that document and pass it to render_draft. This tool does not generate anything by itself — you are the generator.',
+                'Returns the generation brief for a Steward session: what to write, for whom, in what voice, and how long. Call it when the user asks for a document, then immediately write that document yourself, tell the user it is ready and ask before showing it. This tool does not generate anything by itself — you are the generator, and the draft stays in the conversation.',
             inputSchema: {
                 sessionId: z.string(),
                 documentTypeId: z.string().optional(),
@@ -47,6 +53,12 @@ export function registerRequestGenerationTool(server: McpServer): void {
                 dealId: z.string().optional(),
                 userRequest: z.string().optional(),
                 wordLimit: z.number().int().positive().max(5000).optional(),
+                existingDraft: z
+                    .string()
+                    .optional()
+                    .describe(
+                        'When the user is refining a draft you already wrote, pass its full text here. The server does not store drafts, so a refinement brief is only as good as what you pass back.',
+                    ),
                 variant: z
                     .enum(['ui-tool-call', 'conversation'])
                     .optional()
@@ -101,13 +113,16 @@ export function registerRequestGenerationTool(server: McpServer): void {
             };
 
             // Unknown ids throw here, before a run is recorded — a bad id is a
-            // caller error, not a failed generation attempt, and counting it as
-            // one would corrupt the reliability metric.
+            // caller error, not a generation attempt, and counting it as one
+            // would corrupt the orchestration numbers.
             const documentType = workspace.documentType(inputs.documentTypeId);
             const funder = workspace.funder(inputs.funderId);
             const deal = inputs.dealId === undefined ? undefined : workspace.deal(inputs.dealId);
 
-            const existingDraft = session.versions.at(-1)?.text;
+            // The model's own copy comes first: drafts live in the conversation
+            // now, so the store only holds a version if something else put one
+            // there — a manual edit in the panel, stage 5.
+            const existingDraft = input.existingDraft ?? session.versions.at(-1)?.text;
 
             const generationBrief = buildGenerationBrief({
                 documentType,
@@ -118,9 +133,9 @@ export function registerRequestGenerationTool(server: McpServer): void {
                 ...(existingDraft === undefined ? {} : { existingDraft }),
             });
 
-            sessionStore.markGenerating(session.id, inputs);
+            sessionStore.markBriefed(session.id, inputs);
 
-            const run = runLog.start({
+            const run = runLog.record({
                 sessionId: session.id,
                 variant: input.variant ?? 'conversation',
                 documentType: documentType.name,

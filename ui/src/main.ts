@@ -2,21 +2,21 @@ import { App, PostMessageTransport } from '@modelcontextprotocol/ext-apps';
 
 /**
  * Stage 2 widget: a deliberately plain harness for the generation orchestration
- * spike. It exists to run the two variants side by side and watch the cycle
- * complete — the real Steward interface arrives in stage 4.
+ * spike. It exists to run the two variants side by side — the real Steward
+ * interface arrives in stage 4.
+ *
+ * It never shows a draft. The model writes the document in the conversation and
+ * offers it there, so the panel only gathers context and sends the brief.
  */
 
-const POLL_INTERVAL_MS = 1_500;
-const POLL_TIMEOUT_MS = 150_000;
 const CONNECT_TIMEOUT_MS = 15_000;
 
 type Variant = 'ui-tool-call' | 'conversation';
-type Status = 'connecting' | 'connected' | 'generating' | 'ready' | 'failed' | 'error';
+type Status = 'connecting' | 'connected' | 'briefed' | 'error';
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 const statusEl = el('status');
-const draftEl = el('draft');
 const metaEl = el('meta');
 const generateButton = el<HTMLButtonElement>('generate');
 const resetButton = el<HTMLButtonElement>('reset');
@@ -56,7 +56,6 @@ window.addEventListener('unhandledrejection', event => {
 const app = new App({ name: 'steward-app', version: '0.0.0' }, {});
 
 let sessionId: string | null = null;
-let pollTimer: number | undefined;
 
 function setStatus(state: Status, label: string): void {
     statusEl.dataset['state'] = state;
@@ -143,66 +142,6 @@ async function ensureSession(inputs: ReturnType<typeof readInputs>): Promise<str
     return sessionId;
 }
 
-function stopPolling(): void {
-    if (pollTimer !== undefined) {
-        window.clearInterval(pollTimer);
-        pollTimer = undefined;
-    }
-}
-
-/**
- * `render_draft` is called by the model against the server, so the widget is
- * never told directly that a draft landed — it watches the session instead.
- */
-function pollSession(id: string, startedAt: number): void {
-    stopPolling();
-
-    pollTimer = window.setInterval(() => {
-        void (async () => {
-            try {
-                const state = await callTool<{
-                    status: string;
-                    versionCount: number;
-                    latestDraft: string | null;
-                    failureReason?: string;
-                }>('get_session', { sessionId: id });
-
-                if (state.status === 'ready' && state.latestDraft) {
-                    stopPolling();
-                    draftEl.textContent = state.latestDraft;
-                    setStatus('ready', 'Draft ready');
-                    setMeta(
-                        `v${state.versionCount} · ${Math.round((Date.now() - startedAt) / 1000)}s · session ${id.slice(0, 8)}`,
-                    );
-                    generateButton.disabled = false;
-                    return;
-                }
-
-                if (state.status === 'failed') {
-                    stopPolling();
-                    setStatus('failed', state.failureReason ?? 'Generation failed');
-                    setMeta('The model never called render_draft.');
-                    generateButton.disabled = false;
-                    return;
-                }
-
-                setMeta(`waiting for render_draft · ${Math.round((Date.now() - startedAt) / 1000)}s`);
-
-                if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
-                    stopPolling();
-                    setStatus('failed', 'Timed out');
-                    generateButton.disabled = false;
-                }
-            } catch (error) {
-                stopPolling();
-                setStatus('error', 'Polling failed');
-                setMeta(describeError(error));
-                generateButton.disabled = false;
-            }
-        })();
-    }, POLL_INTERVAL_MS);
-}
-
 async function generate(): Promise<void> {
     const inputs = readInputs();
 
@@ -214,12 +153,11 @@ async function generate(): Promise<void> {
 
     const variant = fields.variant.value as Variant;
     generateButton.disabled = true;
-    setStatus('generating', 'Generating…');
+    setStatus('connected', 'Sending brief…');
     setMeta('');
 
     try {
         const id = await ensureSession(inputs);
-        const startedAt = Date.now();
 
         if (variant === 'ui-tool-call') {
             // Variant A: the widget asks for the brief itself, and the model has
@@ -243,14 +181,18 @@ async function generate(): Promise<void> {
                             `Request: ${inputs.userRequest}`,
                             '',
                             'Call request_generation with that sessionId, write the document,',
-                            'then call render_draft with the full text.',
+                            'then tell me it is ready and ask before showing it.',
                         ].join('\n'),
                     },
                 ],
             });
         }
 
-        pollSession(id, startedAt);
+        // Nothing to wait for: the model writes the draft in the conversation and
+        // offers it there, so the panel's job ends with the brief.
+        setStatus('briefed', 'Brief sent');
+        setMeta(`session ${id.slice(0, 8)} · the draft is offered in the chat`);
+        generateButton.disabled = false;
     } catch (error) {
         setStatus('error', 'Generation failed to start');
         setMeta(describeError(error));
@@ -278,9 +220,7 @@ fields.funder.addEventListener('change', () => {
 });
 
 resetButton.addEventListener('click', () => {
-    stopPolling();
     sessionId = null;
-    draftEl.textContent = 'No draft yet.';
     setMeta('New session will be created on the next generate.');
     setStatus('connected', 'Connected');
     generateButton.disabled = false;

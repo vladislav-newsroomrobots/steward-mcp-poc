@@ -56,7 +56,12 @@ export interface DraftVersion {
     createdAt: string;
 }
 
-export type SessionStatus = 'idle' | 'generating' | 'ready' | 'failed';
+/**
+ * `briefed` is where a session stops as far as the server is concerned: the
+ * brief went to the model and the draft is written in the conversation. Only a
+ * panel-side edit (stage 5) puts a version in the store and moves it to `ready`.
+ */
+export type SessionStatus = 'idle' | 'briefed' | 'ready';
 
 export type FeedbackType = 'like' | 'dislike';
 
@@ -89,9 +94,8 @@ export interface Session {
     events: SessionEvent[];
     createdAt: string;
     updatedAt: string;
-    /** Set while status is `generating`; drives the lazy timeout check. */
-    generationStartedAt?: string;
-    failureReason?: string;
+    /** When the brief was last handed to the model. */
+    briefedAt?: string;
 }
 
 /** The package handed to the host model, which does the actual writing. */
@@ -117,9 +121,14 @@ export interface GenerationBrief {
  */
 export type OrchestrationVariant = 'ui-tool-call' | 'conversation';
 
-export type RunResult = 'pending' | 'rendered' | 'timeout';
-
-/** One `request_generation → render_draft` attempt, for the stage 2 metrics. */
+/**
+ * One brief handed to the model.
+ *
+ * There is no completion field, and that is the point: the draft is written in
+ * the conversation and never comes back to the server, so whether the model
+ * finished is not observable here. What remains measurable is how often each
+ * orchestration variant gets as far as asking for a brief at all.
+ */
 export interface GenerationRun {
     runId: string;
     sessionId: string;
@@ -127,10 +136,5 @@ export interface GenerationRun {
     documentType: string;
     wordLimit: number;
     isRefinement: boolean;
-    startedAt: string;
-    requestGenerationCalled: boolean;
-    renderDraftCalled: boolean;
-    result: RunResult;
-    durationMs?: number;
-    failureReason?: string;
+    briefedAt: string;
 }

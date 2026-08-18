@@ -60,15 +60,8 @@ function jsonRpcError(code: number, message: string): unknown {
 
 /** Human-readable rendering of the spike metrics, for `/stats?format=text`. */
 function formatRunSnapshot(snapshot: RunSnapshot): string {
-    const line = (label: string, s: RunSummary): string => {
-        const rate = s.successRate === null ? '—' : `${(s.successRate * 100).toFixed(1)}%`;
-        const duration = s.durationMs === null ? '—' : `${(s.durationMs.avg / 1000).toFixed(1)}s avg`;
-        return `${label.padEnd(16)} ${String(s.attempts).padStart(3)} attempts  ${String(s.rendered).padStart(3)} rendered  ${String(s.timedOut).padStart(3)} timed out  ${String(s.pending).padStart(3)} pending  ${rate.padStart(7)}  ${duration}`;
-    };
-
-    const failures = snapshot.runs
-        .filter(run => run.result !== 'rendered' && run.result !== 'pending')
-        .map(run => `  ${run.runId.slice(0, 8)}  ${run.variant}  ${run.documentType}  ${run.failureReason ?? ''}`);
+    const line = (label: string, s: RunSummary): string =>
+        `${label.padEnd(16)} ${String(s.briefs).padStart(3)} briefs  ${String(s.refinements).padStart(3)} refinements`;
 
     return [
         'Stage 2 — generation orchestration',
@@ -77,8 +70,8 @@ function formatRunSnapshot(snapshot: RunSnapshot): string {
         line('variant A (ui)', snapshot.byVariant['ui-tool-call']),
         line('variant B (chat)', snapshot.byVariant.conversation),
         '',
-        `target: >= 90% for the spike, >= 95% after tuning`,
-        ...(failures.length > 0 ? ['', 'failures:', ...failures] : []),
+        'Briefs only. The draft is written in the conversation and never returns to',
+        'the server, so completion is not observable here — read the chat for that.',
         '',
     ].join('\n');
 }

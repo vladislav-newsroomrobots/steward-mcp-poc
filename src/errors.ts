@@ -10,7 +10,6 @@ export type StewardErrorCode =
     | 'DEAL_NOT_FOUND'
     | 'MISSING_GENERATION_INPUT'
     | 'INVALID_WORD_LIMIT'
-    | 'GENERATION_TIMEOUT'
     | 'NO_FALLBACK_AVAILABLE';
 
 export class StewardError extends Error {

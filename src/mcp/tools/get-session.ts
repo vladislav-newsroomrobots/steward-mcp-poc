@@ -8,8 +8,9 @@ import { withToolLogging } from '../with-tool-logging.js';
 /**
  * Lets the widget read session state.
  *
- * `render_draft` is called by the model, server-side, so the widget has no way
- * to be told directly that a draft arrived — it polls this while generating.
+ * Drafts are written in the conversation, so there is nothing here to wait for
+ * and nothing to poll: this reports what the panel knows — which inputs the
+ * brief went out with, and any version a panel-side edit stored (stage 5).
  * Hidden from the model, which has no reason to call it.
  */
 export function registerGetSessionTool(server: McpServer): void {
@@ -19,14 +20,13 @@ export function registerGetSessionTool(server: McpServer): void {
         {
             title: 'Get Steward session',
             description:
-                'Returns the current state of a Steward drafting session, including its draft versions. Used by the Steward interface.',
+                'Returns the current state of a Steward drafting session. Used by the Steward interface.',
             inputSchema: { sessionId: z.string() },
             outputSchema: {
                 sessionId: z.string(),
                 status: z.string(),
                 versionCount: z.number(),
                 latestDraft: z.string().nullable(),
-                failureReason: z.string().optional(),
             },
             annotations: { readOnlyHint: true, openWorldHint: false },
             _meta: { ui: { visibility: ['app'] } },
@@ -40,7 +40,6 @@ export function registerGetSessionTool(server: McpServer): void {
                 status: session.status,
                 versionCount: session.versions.length,
                 latestDraft: latest?.text ?? null,
-                ...(session.failureReason === undefined ? {} : { failureReason: session.failureReason }),
             };
 
             return {

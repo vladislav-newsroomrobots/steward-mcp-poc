@@ -84,19 +84,17 @@
                 color: var(--muted);
             }
 
-            .badge[data-state='ready'],
             .badge[data-state='connected'] {
                 background: var(--ok-bg);
                 color: var(--ok-fg);
             }
 
-            .badge[data-state='generating'] {
+            .badge[data-state='briefed'] {
                 background: var(--warn-bg);
                 color: var(--warn-fg);
             }
 
-            .badge[data-state='error'],
-            .badge[data-state='failed'] {
+            .badge[data-state='error'] {
                 background: var(--err-bg);
                 color: var(--err-fg);
             }
@@ -202,15 +200,6 @@
                 margin: 16px 0;
             }
 
-            .draft {
-                white-space: pre-wrap;
-                word-break: break-word;
-                padding: 12px;
-                border-radius: 8px;
-                background: var(--code-bg);
-                min-height: 40px;
-            }
-
             .meta {
                 margin-top: 8px;
                 font-size: 12px;
@@ -274,7 +263,7 @@
 
             <hr />
 
-            <div class="draft" id="draft">No draft yet.</div>
+            <p class="meta">The draft is written in the chat, not here.</p>
             <div class="meta" id="meta"></div>
         </div>
         <!--APP_SCRIPT-->

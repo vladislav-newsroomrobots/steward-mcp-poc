@@ -34,7 +34,7 @@ cp .env.example .env   # optional, every value has a default
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | liveness + session count |
-| `GET /stats` | generation reliability metrics; `?format=text` for a report |
+| `GET /stats` | briefs handed to the model, by orchestration variant; `?format=text` for a report |
 | `POST /mcp` | MCP messages; a request without a session ID must be `initialize` |
 | `GET /mcp` | server → client SSE stream for an open session |
 | `DELETE /mcp` | terminates a session |
@@ -49,7 +49,6 @@ leaks between conversations.
 | `PORT` | `3000` | listen port |
 | `HOST` | `127.0.0.1` | bind address |
 | `ALLOWED_HOSTS` | — | extra `Host` values for the DNS-rebinding guard, comma separated; `*` disables the check (see below) |
-| `GENERATION_TIMEOUT_MS` | `120000` | how long a generation may stay open before it counts as failed |
 | `LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
 | `DEMO_MODE` | `false` | forces fallback drafts once generation exists (stage 5+) |
 
@@ -204,15 +203,14 @@ itself needs no change.
 | `get_workspace` | model, app | document types and funders; resolves a name the user said into an id |
 | `get_linked_objects` | model, app | the opportunities linked to a funder |
 | `request_generation` | model, app | returns the generation brief the model writes from |
-| `render_draft` | model | stores the document the model wrote and shows it in the panel |
 | `create_session` | app | opens a drafting session |
-| `get_session` | app | session state, polled by the widget while generating |
+| `get_session` | app | session state for the panel |
 | `ping` | model, app | connectivity probe, no Steward logic |
 | `ui://steward/app.html` | — | resource: the single-file MCP Apps widget |
 
 Visibility comes from `_meta.ui.visibility`. Session plumbing is hidden from the
-model so it cannot wander into it, and `render_draft` is hidden from the widget
-because only the model produces drafts.
+model so it cannot wander into it. No tool accepts a finished draft: the model
+writes it in the conversation and shows it there.
 
 ## Workspace data
 
@@ -244,19 +242,29 @@ Passing `raw` wholesale would bury the few facts that change the prose.
 
 ## The generation cycle
 
-The server never calls an LLM. It hands the host model a brief and takes back a
-finished document:
+The server never calls an LLM, and it never receives a draft either. It hands
+the host model a brief; the document is written and shown in the conversation:
 
 ```text
 Generate (widget)
    → request_generation   returns the brief
    → the model writes the document
-   → render_draft         stores it, panel updates
+   → the model says the draft is ready and asks whether to show it
+   → the user says yes; the model prints it in the chat
 ```
 
-`render_draft` is a separate call from the model to the server, so the widget is
-never told directly that a draft landed — it polls `get_session` while the
-status is `generating`.
+The pause before printing is deliberate. The model writes the whole document
+first and holds it, so the user gets one short sentence rather than several
+hundred words they did not ask to see yet. `request_generation` says so in its
+`nextStep`, the tool description repeats it, and so do the server instructions —
+a model that stops after the brief, or dumps the document unasked, is the
+failure mode worth over-instructing against.
+
+Nothing lands in the store. `get_session` reports the inputs the brief went out
+with and the session sits at `briefed`; a version exists only if a panel-side
+edit created one (stage 5). Refinement therefore depends on the model passing
+the text back: `request_generation` takes an optional `existingDraft`, and
+without it the brief is written from scratch.
 
 Two orchestration variants are implemented, switchable in the widget:
 
@@ -265,26 +273,23 @@ Two orchestration variants are implemented, switchable in the widget:
 | A — UI tool call | the widget calls `request_generation` itself | fewest moving parts, but the model must notice the tool result and continue unprompted |
 | B — conversation | the widget sends a follow-up message via `ui/message` | the model drives the whole cycle, which is the path hosts are tuned for |
 
-A generation that never reaches `render_draft` is failed after
-`GENERATION_TIMEOUT_MS`. That deadline is evaluated when the session is read
-rather than by a timer, so nothing leaks and nothing can sit in `generating`
-forever.
-
 ### Measuring reliability
 
-Every attempt is recorded. `GET /stats` returns JSON;
-`GET /stats?format=text` prints a report:
+`GET /stats` returns JSON; `GET /stats?format=text` prints a report:
 
 ```text
 Stage 2 — generation orchestration
 
-overall           20 attempts   19 rendered    1 timed out    0 pending    95.0%  12.4s avg
-variant A (ui)    10 attempts    8 rendered    2 timed out    0 pending    80.0%  11.8s avg
-variant B (chat)  10 attempts   10 rendered    0 timed out    0 pending   100.0%  13.0s avg
+overall           20 briefs    4 refinements
+variant A (ui)    10 briefs    2 refinements
+variant B (chat)  10 briefs    2 refinements
 ```
 
-The stage 2 target is ≥90% during the spike and ≥95% after tuning. Counters live
-in memory and reset with the process, so finish a matrix in one run.
+Briefs only, and that is the honest limit of it: the draft never returns to the
+server, so nothing here can say whether the model finished, held the document
+back, or printed it unasked. That is judged by reading the chat — these counters
+exist to attribute those readings to a variant. They live in memory and reset
+with the process, so finish a matrix in one run.
 
 ## Layout
 
@@ -326,26 +331,30 @@ Stage 4 may swap esbuild for Vite + React; the output contract — a single
 
 ## Current state — stage 3
 
-The full `request_generation → model writes → render_draft` cycle works on
-fixture data, with refinement, both orchestration variants and reliability
-metrics. Briefs now carry the document type's own instructions plus real funder
-and opportunity context, so draft quality reflects what the product would
-actually produce.
+The `request_generation → model writes → model offers the draft in chat` cycle
+works on fixture data, with refinement and both orchestration variants. Briefs
+carry the document type's own instructions plus real funder and opportunity
+context, so draft quality reflects what the product would actually produce.
 
 The widget has document type, funder and opportunity pickers and surfaces the
-writing tips, but it is still a spike harness rather than the real interface —
-that is stage 4. Manual editing, version history, feedback and copy tracking are
-stage 5; the session store already implements them and they are covered by the
-smoke check ahead of the tools that expose them.
+writing tips, but it is context only — it never shows a draft — and it is still
+a spike harness rather than the real interface. That is stage 4. Manual editing,
+version history, feedback and copy tracking are stage 5; the session store
+already implements them and they are covered by the smoke check ahead of the
+tools that expose them.
 
-`npm run smoke` exercises the whole cycle server-side, standing in for the model.
-What it cannot check is whether a real host actually completes the cycle — that
-is what the matrix below is for.
+`npm run smoke` exercises everything the server can be held to: the brief, the
+`briefed` session state, the refinement hand-back, and the instruction the model
+receives. What no server-side check can reach is the half that now happens in
+the conversation — whether the model writes the document, offers it, and waits.
+That is what the matrix below is for, and it is read by eye.
 
 ### Running the reliability matrix
 
 Restart the server first so the counters start clean, then, from ChatGPT, run
-the documented spread per variant:
+the documented spread per variant. For each run, note by hand whether the model
+wrote the document, offered it in one short sentence, and waited for the user
+before printing it:
 
 | Case | Runs |
 |---|---:|
@@ -354,11 +363,14 @@ the documented spread per variant:
 | vague requests | 5 |
 | refinements | 5 |
 
-Read the result with:
+Read the brief counts with:
 
 ```bash
 curl "http://localhost:3000/stats?format=text"
 ```
+
+They tell you how many briefs each variant produced, not how many cycles
+finished — that number comes from your own tally of the chats.
 
 ### Checking it by hand
 

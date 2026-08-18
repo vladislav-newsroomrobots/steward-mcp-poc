@@ -86,7 +86,7 @@ try {
 
     console.log('\nTool visibility');
     const visibility = Object.fromEntries(tools.map(tool => [tool.name, tool._meta?.ui?.visibility]));
-    check('render_draft is model-only', JSON.stringify(visibility.render_draft) === '["model"]', visibility.render_draft);
+    check('render_draft is gone', !tools.some(tool => tool.name === 'render_draft'), tools.map(tool => tool.name));
     check('get_session is app-only', JSON.stringify(visibility.get_session) === '["app"]', visibility.get_session);
     check('create_session is app-only', JSON.stringify(visibility.create_session) === '["app"]', visibility.create_session);
 
@@ -151,29 +151,31 @@ try {
     // The CRM export is mostly plumbing; only fields a fundraiser would use
     // belong in the brief.
     check('brief omits CRM plumbing', generationBrief?.context?.funder?.sourceSystem === undefined);
+    const nextStep = brief.structuredContent?.nextStep;
+    check('result tells the model to continue', typeof nextStep === 'string' && nextStep.includes('Do not stop here'));
+    // The draft is the model's to show. The instruction has to say so, and it
+    // must not point anywhere else: there is no tool left to take the text.
     check(
-        'result tells the model to continue',
-        typeof brief.structuredContent?.nextStep === 'string' && brief.structuredContent.nextStep.includes('render_draft'),
+        'result keeps the draft in the chat',
+        typeof nextStep === 'string' && nextStep.includes('ask whether') && nextStep.includes('once they say yes'),
+        nextStep,
     );
+    check('result names no draft tool', typeof nextStep === 'string' && !nextStep.includes('render_draft'));
 
-    const generating = await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } });
-    check('session is generating', generating.structuredContent?.status === 'generating', generating.structuredContent);
-
-    const draftText = 'Dear Acme Foundation, thank you for supporting our education programme.';
-    await client.callTool({ name: 'render_draft', arguments: { sessionId: generationSessionId, text: draftText } });
-
-    const ready = await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } });
-    check('session is ready', ready.structuredContent?.status === 'ready', ready.structuredContent);
-    check('draft is stored', ready.structuredContent?.latestDraft === draftText);
-    check('one version exists', ready.structuredContent?.versionCount === 1, ready.structuredContent?.versionCount);
+    const briefed = await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } });
+    check('session is briefed', briefed.structuredContent?.status === 'briefed', briefed.structuredContent);
+    check('no draft is stored', briefed.structuredContent?.latestDraft === null, briefed.structuredContent?.latestDraft);
 
     console.log('\nRefinement');
+    // The server keeps no draft, so a refinement brief is only as good as the
+    // text the model hands back.
+    const draftText = 'Dear Acme Foundation, thank you for supporting our education programme.';
     const refine = await client.callTool({
         name: 'request_generation',
-        arguments: { sessionId: generationSessionId, userRequest: 'Make it warmer.' },
+        arguments: { sessionId: generationSessionId, userRequest: 'Make it warmer.', existingDraft: draftText },
     });
     check(
-        'refinement brief includes the current draft',
+        'refinement brief includes the draft the model passed back',
         refine.structuredContent?.generationBrief?.existingDraft === draftText,
         refine.structuredContent?.generationBrief?.existingDraft,
     );
@@ -181,13 +183,6 @@ try {
         'omitted fields fall back to the session',
         refine.structuredContent?.generationBrief?.funder === ws.funders[0].name,
     );
-
-    await client.callTool({
-        name: 'render_draft',
-        arguments: { sessionId: generationSessionId, text: `${draftText} We are grateful.` },
-    });
-    const refined = await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } });
-    check('two versions exist', refined.structuredContent?.versionCount === 2, refined.structuredContent?.versionCount);
 
     console.log('\nGeneration errors');
     const unknownSessionCall = await client.callTool({
@@ -234,10 +229,9 @@ try {
 
     console.log('\nSpike metrics');
     const stats = await (await fetch(`${baseUrl}/stats`)).json();
-    check('two attempts recorded', stats.overall.attempts === 2, stats.overall);
-    check('both rendered', stats.overall.rendered === 2, stats.overall);
-    check('success rate is 1', stats.overall.successRate === 1, stats.overall.successRate);
-    check('variant is attributed', stats.byVariant['ui-tool-call'].attempts === 1, stats.byVariant);
+    check('two briefs recorded', stats.overall.briefs === 2, stats.overall);
+    check('one refinement recorded', stats.overall.refinements === 1, stats.overall);
+    check('variant is attributed', stats.byVariant['ui-tool-call'].briefs === 1, stats.byVariant);
     check('refinement is flagged', stats.runs.some(run => run.isRefinement === true));
 
     const statsText = await (await fetch(`${baseUrl}/stats?format=text`)).text();
