@@ -6,7 +6,12 @@ import { STEWARD_APP_URI } from '../resources/widgets.js';
 import { withToolLogging } from '../with-tool-logging.js';
 
 /**
- * Entry point of the app: renders the Steward panel in the conversation.
+ * Entry point of the app: renders the drafting form in the conversation.
+ *
+ * The description deliberately does not cover showing a draft. It used to say
+ * "write, refine or review", which made it the best match for "show me the
+ * draft" as well — and the user got this form instead of the document. Each
+ * panel now names itself and points at the other.
  *
  * `funderId` is optional and only a hint — stage 1 echoes it back so the UI can
  * preselect a funder once fixtures exist (stage 3).
@@ -18,7 +23,7 @@ export function registerOpenStewardTool(server: McpServer): void {
         {
             title: 'Open Steward',
             description:
-                'Opens the Steward drafting interface in the conversation. Call this whenever the user wants to write, refine or review a communication to a funder. Pass funderId when the user named a funder you already know the id of.',
+                'Opens the Steward drafting form — document type, funders, opportunities and the request — so the user can start a new document. Call it when they want to write or rewrite something and no session is under way. This form never displays a draft: to show a document that already exists, call render_draft instead. Pass funderId when the user named a funder you already know the id of.',
             inputSchema: { funderId: z.string().optional() },
             outputSchema: { opened: z.boolean(), funderId: z.string().optional() },
             annotations: { readOnlyHint: true, openWorldHint: false },

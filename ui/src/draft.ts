@@ -32,6 +32,12 @@ function describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
+/** The text block of a tool result, which is where a failure explains itself. */
+function firstText(content: Array<{ type: string; text?: string }> | undefined): string | undefined {
+    const first = content?.[0];
+    return first?.type === 'text' ? first.text : undefined;
+}
+
 window.addEventListener('error', event => {
     setStatus('error', 'Script error');
     setMeta(event.message);
@@ -75,6 +81,15 @@ app.ontoolinput = params => {
 };
 
 app.ontoolresult = params => {
+    // A tool that throws comes back as a result with `isError`, not as a
+    // rejection. Unchecked, the panel would keep the text the arguments already
+    // painted and label it a stored version that does not exist.
+    if (params.isError === true) {
+        setStatus('error', 'The draft was not stored');
+        setMeta(firstText(params.content) ?? 'render_draft failed.');
+        return;
+    }
+
     const result = params.structuredContent as
         | { sessionId?: string; versionCount?: number }
         | undefined;
@@ -92,13 +107,25 @@ app.ontoolresult = params => {
                     name: 'get_session',
                     arguments: { sessionId },
                 });
+
+                // `callServerTool` resolves on a tool error too, so the flag has
+                // to be read or the panel sits on "Waiting" for a call that
+                // already failed.
+                if (state.isError) {
+                    throw new Error(firstText(state.content) ?? 'get_session failed');
+                }
+
                 const latest = (state.structuredContent as { latestDraft?: string } | undefined)
                     ?.latestDraft;
 
                 if (typeof latest === 'string' && latest !== '') {
                     showDraft(latest);
                     setMeta(describeVersion(result?.versionCount ?? 0));
+                    return;
                 }
+
+                setStatus('error', 'No draft to show');
+                setMeta(`Session ${sessionId?.slice(0, 8)} has no stored version.`);
             } catch (error) {
                 setStatus('error', 'Could not load the draft');
                 setMeta(describeError(error));

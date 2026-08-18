@@ -242,6 +242,27 @@ try {
     check('session is ready', ready.structuredContent?.status === 'ready', ready.structuredContent);
     check('draft is stored', ready.structuredContent?.latestDraft === draftText);
 
+    // Asked for the draft again several turns later, the model is no longer
+    // holding the text. Without this path it has no cheap way to show the draft
+    // and reaches for whichever panel needs no arguments — which is how
+    // "show me the draft" started opening the drafting form.
+    const reopened = await client.callTool({
+        name: 'render_draft',
+        arguments: { sessionId: generationSessionId },
+    });
+    check('render_draft reopens the stored draft', reopened.structuredContent?.versionId === rendered.structuredContent?.versionId, reopened.structuredContent);
+    check('reopening adds no version', reopened.structuredContent?.versionCount === 1, reopened.structuredContent?.versionCount);
+
+    const emptySession = await client.callTool({
+        name: 'create_session',
+        arguments: { documentTypeId, funderIds: [funderId], userRequest: 'Anything.', wordLimit: 300 },
+    });
+    const nothingToShow = await client.callTool({
+        name: 'render_draft',
+        arguments: { sessionId: emptySession.structuredContent?.sessionId },
+    });
+    check('reopening a session with no draft is an MCP error', nothingToShow.isError === true);
+
     console.log('\nRefinement');
     const refine = await client.callTool({
         name: 'request_generation',
@@ -373,6 +394,8 @@ try {
     console.log('\nSpike metrics');
     const stats = await (await fetch(`${baseUrl}/stats`)).json();
     check('four briefs recorded', stats.overall.briefs === 4, stats.overall);
+    // Reopening a stored draft must not close a brief, or the rate counts the
+    // same generation twice.
     check('one draft rendered', stats.overall.rendered === 1, stats.overall);
     check('two refinements recorded', stats.overall.refinements === 2, stats.overall);
     check('variant is attributed', stats.byVariant['ui-tool-call'].briefs === 1, stats.byVariant);

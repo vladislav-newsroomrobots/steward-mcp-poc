@@ -298,6 +298,14 @@ the user has not answered. Refinement reuses the stored version, and
 `request_generation` also takes an optional `existingDraft` for the case where
 the model is holding something newer than it ever rendered.
 
+Showing a draft again costs a sessionId and nothing else: `render_draft` takes
+`text` only the first time, and re-opens the stored version without it. That is
+deliberate. Asked for the draft a few turns later the model is no longer holding
+the document, and a tool that demanded it back pushed the model towards the panel
+that needs no arguments — which is how "show me the draft" used to open the
+drafting form instead. Each tool description now names its own panel and points
+at the other.
+
 Two orchestration variants exist. The panel drives B; A is still accepted by
 `request_generation` and exercised by the smoke check, but nothing in the widget
 selects it any more:

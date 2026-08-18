@@ -25,9 +25,14 @@ const INSTRUCTIONS = [
     '5. When the user says yes, call render_draft with the full text and the same',
     '   sessionId. The draft opens in its own panel; keep your chat reply to one sentence.',
     '',
-    'There are three panels. open_steward is the drafting form — funders, opportunities,',
-    'document types and the request. render_draft shows one finished document.',
-    'list_sessions shows everything drafted in this workspace so far.',
+    'There are three panels, and each tool opens its own:',
+    '- open_steward — the drafting form: funders, opportunities, document types, request.',
+    '- render_draft — one finished document.',
+    '- list_sessions — everything drafted in this workspace so far.',
+    '',
+    'To show a draft, at any point, call render_draft: with the text the first time and',
+    'with the sessionId alone afterwards. Never open the drafting form to show a draft,',
+    'and never paste the document into the chat.',
 ].join('\n');
 
 /**

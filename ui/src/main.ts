@@ -4,8 +4,12 @@ import { App, PostMessageTransport } from '@modelcontextprotocol/ext-apps';
  * Stage 2 widget: a deliberately plain harness for the generation orchestration
  * spike — the real Steward interface arrives in stage 4.
  *
- * It never shows a draft. The model writes the document in the conversation and
- * offers it there, so the panel only gathers context and hands over the request.
+ * It never shows a draft: this panel gathers context and hands over the request,
+ * and the finished document opens in the draft panel via `render_draft`.
+ *
+ * There is no way to start a session from here either. The host re-renders the
+ * panel on every `open_steward`, so a fresh one already means a fresh session;
+ * within one panel the session persists, which is what refinement needs.
  */
 
 const CONNECT_TIMEOUT_MS = 15_000;
@@ -17,7 +21,6 @@ const el = <T extends HTMLElement>(id: string): T => document.getElementById(id)
 const statusEl = el('status');
 const metaEl = el('meta');
 const generateButton = el<HTMLButtonElement>('generate');
-const resetButton = el<HTMLButtonElement>('reset');
 
 const tipsEl = el('tips');
 
@@ -295,17 +298,6 @@ fields.documentType.addEventListener('change', () => showTips(fields.documentTyp
 attachPicker(funders);
 attachPicker(deals);
 
-resetButton.addEventListener('click', () => {
-    sessionId = null;
-    funders.chosen.clear();
-    deals.chosen.clear();
-    render(funders);
-    render(deals);
-    setMeta('New session will be created on the next generate.');
-    setStatus('connected', 'Connected');
-    generateButton.disabled = false;
-});
-
 try {
     // Raced against a deadline: `ui/initialize` inherits a long protocol
     // timeout, and a silent multi-minute wait is indistinguishable from a dead
@@ -351,7 +343,6 @@ try {
     showTips(fields.documentType.value);
 
     generateButton.disabled = false;
-    resetButton.disabled = false;
 } catch (error) {
     setStatus('error', 'Connection failed');
     setMeta(describeError(error));
