@@ -2,7 +2,7 @@ import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
-import { STEWARD_APP_URI } from '../resources/steward-app.js';
+import { STEWARD_APP_URI } from '../resources/widgets.js';
 import { withToolLogging } from '../with-tool-logging.js';
 
 /**

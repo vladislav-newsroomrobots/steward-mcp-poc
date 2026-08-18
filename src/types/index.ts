@@ -135,12 +135,11 @@ export interface GenerationBrief {
 export type OrchestrationVariant = 'ui-tool-call' | 'conversation';
 
 /**
- * One brief handed to the model.
+ * One brief handed to the model, and whether a draft came back for it.
  *
- * There is no completion field, and that is the point: the draft is written in
- * the conversation and never comes back to the server, so whether the model
- * finished is not observable here. What remains measurable is how often each
- * orchestration variant gets as far as asking for a brief at all.
+ * `renderedAt` is set by `render_draft`. A run without one is not a failure —
+ * the user may simply not have asked to see the draft yet — so there is no
+ * deadline here and nothing ever moves a run to failed.
  */
 export interface GenerationRun {
     runId: string;
@@ -150,4 +149,6 @@ export interface GenerationRun {
     wordLimit: number;
     isRefinement: boolean;
     briefedAt: string;
+    renderedAt?: string;
+    durationMs?: number;
 }

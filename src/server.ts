@@ -60,8 +60,11 @@ function jsonRpcError(code: number, message: string): unknown {
 
 /** Human-readable rendering of the spike metrics, for `/stats?format=text`. */
 function formatRunSnapshot(snapshot: RunSnapshot): string {
-    const line = (label: string, s: RunSummary): string =>
-        `${label.padEnd(16)} ${String(s.briefs).padStart(3)} briefs  ${String(s.refinements).padStart(3)} refinements`;
+    const line = (label: string, s: RunSummary): string => {
+        const rate = s.renderedRate === null ? '—' : `${(s.renderedRate * 100).toFixed(1)}%`;
+        const duration = s.durationMs === null ? '—' : `${(s.durationMs.avg / 1000).toFixed(1)}s avg`;
+        return `${label.padEnd(16)} ${String(s.briefs).padStart(3)} briefs  ${String(s.rendered).padStart(3)} rendered  ${String(s.refinements).padStart(3)} refinements  ${rate.padStart(7)}  ${duration}`;
+    };
 
     return [
         'Stage 2 — generation orchestration',
@@ -70,8 +73,8 @@ function formatRunSnapshot(snapshot: RunSnapshot): string {
         line('variant A (ui)', snapshot.byVariant['ui-tool-call']),
         line('variant B (chat)', snapshot.byVariant.conversation),
         '',
-        'Briefs only. The draft is written in the conversation and never returns to',
-        'the server, so completion is not observable here — read the chat for that.',
+        'A brief without a draft is not a failure: the model offers the document and',
+        'waits, so an unrendered run may be one the user has not answered yet.',
         '',
     ].join('\n');
 }

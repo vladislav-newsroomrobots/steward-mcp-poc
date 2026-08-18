@@ -14,19 +14,20 @@ export const SERVER_VERSION = '0.0.0';
  */
 const INSTRUCTIONS = [
     'Steward helps fundraising teams draft communications to funders.',
-    'The Steward interface is rendered as an MCP App inside the conversation;',
-    'tools are the only way to read Steward data or open the panel.',
+    'The Steward interface is rendered as MCP App panels inside the conversation;',
+    'tools are the only way to read Steward data or open a panel.',
     '',
     'Generating a document works like this, and you are the generator:',
     '1. request_generation returns a brief — what to write, for whom, and how long.',
     '2. Do not stop after receiving the brief, and do not summarise it back to the user.',
     '3. Write the complete document yourself, respecting the instructions and word limit.',
-    '4. There is no tool that takes the draft. It stays in the conversation, written by you.',
-    '5. Do not print it straight away: say the draft is ready and ask whether to show it.',
-    '6. When the user says yes, print the full document in the chat.',
+    '4. Do not paste it into the chat. Say the draft is ready and ask whether to show it.',
+    '5. When the user says yes, call render_draft with the full text and the same',
+    '   sessionId. The draft opens in its own panel; keep your chat reply to one sentence.',
     '',
-    'The panel is context only — funders, opportunities, document types and session',
-    'state. It never displays the draft, so never tell the user to look for it there.',
+    'There are three panels. open_steward is the drafting form — funders, opportunities,',
+    'document types and the request. render_draft shows one finished document.',
+    'list_sessions shows everything drafted in this workspace so far.',
 ].join('\n');
 
 /**

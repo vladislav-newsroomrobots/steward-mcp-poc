@@ -28,17 +28,18 @@ const unique = (ids: string[]): string[] => [...new Set(ids)];
  * again in this result, because a model that stops after the brief is the
  * single failure mode that breaks the product.
  *
- * The draft itself stays in the conversation — no tool takes it back. So the
- * second half of the instruction is about pacing: write it, say it is ready,
- * and print it only once the user asks.
+ * The second half of the instruction is about pacing. The document is written
+ * before it is offered, so the offer is real; and it is shown through
+ * `render_draft`, in its own panel, rather than pasted into the chat.
  */
 const CONTINUATION_INSTRUCTION = [
     'Do not stop here, and do not describe this brief back to the user.',
     'Write the complete document now, following the instructions and word limit above.',
-    'Hold it back for the moment — no tool takes it, and the user reads it in this chat.',
-    'Then reply with one short sentence saying the draft is ready,',
+    'Hold it back for the moment — do not paste it into the chat.',
+    'Reply with one short sentence saying the draft is ready,',
     'and ask whether they would like to see it.',
-    'Print the full document in your next reply, once they say yes.',
+    'Once they say yes, call render_draft with the full text and the same sessionId;',
+    'it opens the draft in its own panel. Keep your reply to one short sentence either way.',
 ].join(' ');
 
 export function registerRequestGenerationTool(server: McpServer): void {
@@ -48,7 +49,7 @@ export function registerRequestGenerationTool(server: McpServer): void {
         {
             title: 'Request Steward generation',
             description:
-                'Returns the generation brief for a Steward session: what to write, for whom, in what voice, and how long. Call it when the user asks for a document, then immediately write that document yourself, tell the user it is ready and ask before showing it. This tool does not generate anything by itself — you are the generator, and the draft stays in the conversation.',
+                'Returns the generation brief for a Steward session: what to write, for whom, in what voice, and how long. Call it when the user asks for a document, then immediately write that document yourself, tell the user it is ready, and ask before showing it — showing it means calling render_draft. This tool does not generate anything by itself; you are the generator.',
             inputSchema: {
                 sessionId: z.string(),
                 documentTypeId: z.string().optional(),
@@ -60,7 +61,7 @@ export function registerRequestGenerationTool(server: McpServer): void {
                     .string()
                     .optional()
                     .describe(
-                        'When the user is refining a draft you already wrote, pass its full text here. The server does not store drafts, so a refinement brief is only as good as what you pass back.',
+                        'When the user is refining a draft you already wrote, pass its full text here. Optional if the draft went through render_draft — the stored version is used when this is omitted.',
                     ),
                 variant: z
                     .enum(['ui-tool-call', 'conversation'])
@@ -139,9 +140,9 @@ export function registerRequestGenerationTool(server: McpServer): void {
             const funders = inputs.funderIds.map(id => workspace.funder(id));
             const deals = inputs.dealIds.map(id => workspace.deal(id));
 
-            // The model's own copy comes first: drafts live in the conversation
-            // now, so the store only holds a version if something else put one
-            // there — a manual edit in the panel, stage 5.
+            // The model's own copy comes first: it may be refining something it
+            // never sent through render_draft, and what it is holding is more
+            // current than the last stored version.
             const existingDraft = input.existingDraft ?? session.versions.at(-1)?.text;
 
             const generationBrief = buildGenerationBrief({

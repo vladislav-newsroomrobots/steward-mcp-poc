@@ -203,14 +203,22 @@ itself needs no change.
 | `get_workspace` | model, app | document types, funders and opportunities; resolves a name the user said into an id |
 | `get_linked_objects` | model, app | follows the funder ↔ opportunity link in either direction |
 | `request_generation` | model, app | returns the generation brief the model writes from |
+| `render_draft` | model | stores a finished document and opens it in its own panel |
+| `list_sessions` | model, app | opens a panel listing every drafting session |
 | `create_session` | app | opens a drafting session |
 | `get_session` | app | session state for the panel |
 | `ping` | model, app | connectivity probe, no Steward logic |
-| `ui://steward/app.html` | — | resource: the single-file MCP Apps widget |
+| `ui://steward/app.html` | — | resource: the drafting panel |
+| `ui://steward/draft.html` | — | resource: one finished document |
+| `ui://steward/sessions.html` | — | resource: the session list |
 
 Visibility comes from `_meta.ui.visibility`. Session plumbing is hidden from the
-model so it cannot wander into it. No tool accepts a finished draft: the model
-writes it in the conversation and shows it there.
+model so it cannot wander into it, and `render_draft` is hidden from the widget
+because only the model produces drafts.
+
+Three tools carry a `_meta.ui.resourceUri` and open a panel of their own:
+`open_steward`, `render_draft` and `list_sessions`. Each panel is a separate
+resource, so a draft can stay on screen while the drafting form is used again.
 
 ## Workspace data
 
@@ -263,29 +271,32 @@ otherwise lose it.
 
 ## The generation cycle
 
-The server never calls an LLM, and it never receives a draft either. It hands
-the host model a brief; the document is written and shown in the conversation:
+The server never calls an LLM. It hands the host model a brief and takes back a
+finished document:
 
 ```text
 Generate (widget)
    → request_generation   returns the brief
    → the model writes the document
    → the model says the draft is ready and asks whether to show it
-   → the user says yes; the model prints it in the chat
+   → the user says yes
+   → render_draft         stores it, the draft panel opens
 ```
 
-The pause before printing is deliberate. The model writes the whole document
-first and holds it, so the user gets one short sentence rather than several
-hundred words they did not ask to see yet. `request_generation` says so in its
-`nextStep`, the tool description repeats it, and so do the server instructions —
-a model that stops after the brief, or dumps the document unasked, is the
-failure mode worth over-instructing against.
+The pause is deliberate, and so is where the draft lands. The model writes the
+whole document first and holds it, so the user gets one short sentence rather
+than several hundred words they did not ask to see yet; and when they do ask, the
+document goes through `render_draft` into its own panel instead of being pasted
+into the chat. `request_generation` says both in its `nextStep`, the tool
+descriptions repeat them, and so do the server instructions — a model that stops
+after the brief, or dumps the document unasked, is the failure mode worth
+over-instructing against.
 
-Nothing lands in the store. `get_session` reports the inputs the brief went out
-with and the session sits at `briefed`; a version exists only if a panel-side
-edit created one (stage 5). Refinement therefore depends on the model passing
-the text back: `request_generation` takes an optional `existingDraft`, and
-without it the brief is written from scratch.
+A session sits at `briefed` until a draft arrives and `ready` afterwards; there
+is no deadline in between, because a brief with no draft may simply be an offer
+the user has not answered. Refinement reuses the stored version, and
+`request_generation` also takes an optional `existingDraft` for the case where
+the model is holding something newer than it ever rendered.
 
 Two orchestration variants exist. The panel drives B; A is still accepted by
 `request_generation` and exercised by the smoke check, but nothing in the widget
@@ -303,16 +314,16 @@ selects it any more:
 ```text
 Stage 2 — generation orchestration
 
-overall           20 briefs    4 refinements
-variant A (ui)    10 briefs    2 refinements
-variant B (chat)  10 briefs    2 refinements
+overall           20 briefs   19 rendered    4 refinements    95.0%  12.4s avg
+variant A (ui)    10 briefs    8 rendered    2 refinements    80.0%  11.8s avg
+variant B (chat)  10 briefs   10 rendered    2 refinements   100.0%  13.0s avg
 ```
 
-Briefs only, and that is the honest limit of it: the draft never returns to the
-server, so nothing here can say whether the model finished, held the document
-back, or printed it unasked. That is judged by reading the chat — these counters
-exist to attribute those readings to a variant. They live in memory and reset
-with the process, so finish a matrix in one run.
+Read the rate as how often the cycle completed, not as a reliability score: a
+brief without a draft can equally be an offer the user declined or has not
+answered yet. What the numbers cannot see at all is whether the model paused to
+ask — that is read off the chat. Counters live in memory and reset with the
+process, so finish a matrix in one run.
 
 ## Layout
 
@@ -329,48 +340,69 @@ src/
 ├── generation/    generation brief builder  (stage 5)
 └── types/         shared domain types
 ui/
-├── index.html     widget shell and styles
-├── src/main.ts    widget logic
-└── dist/app.html  build output, served as the MCP Apps resource (git-ignored)
+├── styles.css     the shared stylesheet, inlined into every widget at build time
+├── index.html     drafting panel shell   → src/main.ts
+├── draft.html     draft panel shell      → src/draft.ts
+├── sessions.html  session list shell     → src/sessions.ts
+└── dist/*.html    build output, served as the MCP Apps resources (git-ignored)
 scripts/
-├── build-ui.mjs   esbuild bundle → single self-contained HTML
+├── build-ui.mjs   esbuild bundle → one self-contained HTML per widget
 └── smoke.mjs      acceptance check
 fixtures/          JSON fixture data         (stage 3)
 ```
 
-## The widget
+## The widgets
 
-The host renders the widget in a sandboxed iframe under a strict CSP, so
-everything is inlined into one HTML file — no external scripts, styles or
-fonts. `scripts/build-ui.mjs` bundles `ui/src/main.ts` with esbuild and injects
-it into `ui/index.html`.
+There are three, one per panel:
+
+| Panel | Opened by | What it does |
+|---|---|---|
+| `app` | `open_steward` | the drafting form: document type, funders, opportunities, request |
+| `draft` | `render_draft` | one finished document, with its version and word count |
+| `sessions` | `list_sessions` | every session in the workspace, newest first, with a draft preview |
+
+The host renders each in a sandboxed iframe under a strict CSP, so everything is
+inlined into one HTML file — no external scripts, styles or fonts.
+`scripts/build-ui.mjs` bundles each entry point with esbuild and injects it,
+along with the shared `ui/styles.css`, into that widget's template. The
+stylesheet is shared at build time rather than copied per template: three panels
+that should look like one product must not carry three drifting sets of tokens.
 
 Inside the iframe, `@modelcontextprotocol/ext-apps` connects to the host over
 `postMessage` and calls MCP tools through it. The server is never contacted
 directly by the iframe.
 
-Stage 4 may swap esbuild for Vite + React; the output contract — a single
-`ui/dist/app.html` — stays the same.
+How a panel gets its data differs by what it needs. The draft panel reads the
+`render_draft` arguments straight off the `ui/notifications/tool-input` the host
+sends — the document is already in the call, so the common path needs no round
+trip; it falls back to `get_session` for hosts that deliver only the result. The
+sessions panel takes no arguments, so it calls `list_sessions` itself on connect
+and on every Refresh, since the result that opened it may already be stale.
+
+Stage 4 may swap esbuild for Vite + React; the output contract — one
+self-contained `ui/dist/<name>.html` per widget — stays the same.
 
 ## Current state — stage 3
 
-The `request_generation → model writes → model offers the draft in chat` cycle
+The `request_generation → model writes → model offers → render_draft` cycle
 works on fixture data, with refinement and both orchestration variants. Briefs
 carry the document type's own instructions plus real funder and opportunity
 context, so draft quality reflects what the product would actually produce.
 
-The widget has a document type picker, chip-based funder and opportunity
-selection, and surfaces the writing tips, but it is context only — it never shows a draft — and it is still
-a spike harness rather than the real interface. That is stage 4. Manual editing,
+The drafting panel has a document type picker, chip-based funder and opportunity
+selection, and surfaces the writing tips; the draft and session panels are one
+screen each. All three are still spike harnesses rather than the real
+interface. That is stage 4. Manual editing,
 version history, feedback and copy tracking are stage 5; the session store
 already implements them and they are covered by the smoke check ahead of the
 tools that expose them.
 
-`npm run smoke` exercises everything the server can be held to: the brief, the
-`briefed` session state, the refinement hand-back, and the instruction the model
-receives. What no server-side check can reach is the half that now happens in
-the conversation — whether the model writes the document, offers it, and waits.
-That is what the matrix below is for, and it is read by eye.
+`npm run smoke` exercises everything the server can be held to: the brief, both
+session states, `render_draft`, the session listing, all three widget resources,
+and the instruction the model receives. What no server-side check can reach is
+the half that happens in the conversation — whether the model writes the
+document, offers it, and waits. That is what the matrix below is for, and it is
+read by eye.
 
 ### Running the reliability matrix
 

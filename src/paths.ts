@@ -6,5 +6,6 @@ import { fileURLToPath } from 'node:url';
  */
 export const PROJECT_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
-/** Single-file MCP Apps widget produced by `npm run build:ui`. */
-export const UI_HTML_PATH = fileURLToPath(new URL('../ui/dist/app.html', import.meta.url));
+/** One self-contained MCP Apps widget, produced by `npm run build:ui`. */
+export const uiHtmlPath = (name: string): string =>
+    fileURLToPath(new URL(`../ui/dist/${name}.html`, import.meta.url));

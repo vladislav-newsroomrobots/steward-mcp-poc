@@ -61,34 +61,51 @@ try {
     const opened = await client.callTool({ name: 'open_steward', arguments: { funderId: 'acme' } });
     check('open_steward echoes funderId', opened.structuredContent?.funderId === 'acme', opened.structuredContent);
 
-    console.log('\nMCP Apps resource');
+    console.log('\nMCP Apps resources');
     const { resources } = await client.listResources();
+    const widgetUris = ['ui://steward/app.html', 'ui://steward/draft.html', 'ui://steward/sessions.html'];
     check(
-        'app resource is listed',
-        resources.some(resource => resource.uri === 'ui://steward/app.html'),
+        'every widget resource is listed',
+        widgetUris.every(uri => resources.some(resource => resource.uri === uri)),
         resources.map(resource => resource.uri),
     );
 
-    const widget = await client.readResource({ uri: 'ui://steward/app.html' });
-    const doc = widget.contents[0];
-    check('resource uses the MCP Apps mime type', doc?.mimeType === 'text/html;profile=mcp-app', doc?.mimeType);
-    check('widget html is self-contained', typeof doc?.text === 'string' && doc.text.includes('<script type="module">'));
-    check('widget has no external src', typeof doc?.text === 'string' && !/<script[^>]+src=/.test(doc.text));
-    // `$&` and "$`" in the bundle are substitution patterns for String.replace.
-    // Injecting the script with a string replacement silently splices the
-    // surrounding HTML into the JavaScript and breaks the whole widget.
-    check('script injection did not corrupt the bundle', !doc?.text?.includes('APP_SCRIPT'));
-    check(
-        'stylesheet appears exactly once',
-        (doc?.text?.split('color-scheme: light dark').length ?? 0) - 1 === 1,
-        (doc?.text?.split('color-scheme: light dark').length ?? 0) - 1,
-    );
+    // Each panel is its own document, so each has to stand on its own: the CSP
+    // in the host iframe blocks anything loaded from outside it.
+    for (const uri of widgetUris) {
+        const widget = await client.readResource({ uri });
+        const doc = widget.contents[0];
+        const name = uri.replace('ui://steward/', '');
 
-    console.log('\nTool visibility');
+        check(`${name} uses the MCP Apps mime type`, doc?.mimeType === 'text/html;profile=mcp-app', doc?.mimeType);
+        check(
+            `${name} is self-contained`,
+            typeof doc?.text === 'string' && doc.text.includes('<script type="module">'),
+        );
+        check(`${name} has no external src`, typeof doc?.text === 'string' && !/<script[^>]+src=/.test(doc.text));
+        // `$&` and "$`" in the bundle are substitution patterns for String.replace.
+        // Injecting the script with a string replacement silently splices the
+        // surrounding HTML into the JavaScript and breaks the whole widget.
+        check(`${name} survived script injection`, !doc?.text?.includes('APP_SCRIPT'));
+        check(`${name} kept its styles`, !doc?.text?.includes('APP_STYLES'));
+        check(
+            `${name} inlines the stylesheet exactly once`,
+            (doc?.text?.split('color-scheme: light dark').length ?? 0) - 1 === 1,
+            (doc?.text?.split('color-scheme: light dark').length ?? 0) - 1,
+        );
+    }
+
+    console.log('\nTool visibility and panels');
     const visibility = Object.fromEntries(tools.map(tool => [tool.name, tool._meta?.ui?.visibility]));
-    check('render_draft is gone', !tools.some(tool => tool.name === 'render_draft'), tools.map(tool => tool.name));
+    check('render_draft is model-only', JSON.stringify(visibility.render_draft) === '["model"]', visibility.render_draft);
     check('get_session is app-only', JSON.stringify(visibility.get_session) === '["app"]', visibility.get_session);
     check('create_session is app-only', JSON.stringify(visibility.create_session) === '["app"]', visibility.create_session);
+
+    // A tool that opens a panel names it here; without the URI the host has
+    // nothing to render and the call is just text.
+    const resourceUri = Object.fromEntries(tools.map(tool => [tool.name, tool._meta?.ui?.resourceUri]));
+    check('render_draft opens the draft panel', resourceUri.render_draft === 'ui://steward/draft.html', resourceUri.render_draft);
+    check('list_sessions opens the sessions panel', resourceUri.list_sessions === 'ui://steward/sessions.html', resourceUri.list_sessions);
 
     console.log('\nWorkspace fixtures');
     const ws = (await client.callTool({ name: 'get_workspace', arguments: {} })).structuredContent;
@@ -194,29 +211,44 @@ try {
     check('brief omits CRM plumbing', generationBrief?.context?.funders?.[0]?.sourceSystem === undefined);
     const nextStep = brief.structuredContent?.nextStep;
     check('result tells the model to continue', typeof nextStep === 'string' && nextStep.includes('Do not stop here'));
-    // The draft is the model's to show. The instruction has to say so, and it
-    // must not point anywhere else: there is no tool left to take the text.
+    // Two halves, both load-bearing: the model asks before showing anything, and
+    // showing means the panel rather than a wall of text in the chat.
     check(
-        'result keeps the draft in the chat',
-        typeof nextStep === 'string' && nextStep.includes('ask whether') && nextStep.includes('once they say yes'),
+        'result tells the model to ask first',
+        typeof nextStep === 'string' && nextStep.includes('ask whether') && nextStep.includes('say yes'),
         nextStep,
     );
-    check('result names no draft tool', typeof nextStep === 'string' && !nextStep.includes('render_draft'));
+    check(
+        'result sends the draft through render_draft',
+        typeof nextStep === 'string' &&
+            nextStep.includes('render_draft') &&
+            nextStep.includes('do not paste it into the chat'),
+        nextStep,
+    );
 
     const briefed = await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } });
     check('session is briefed', briefed.structuredContent?.status === 'briefed', briefed.structuredContent);
-    check('no draft is stored', briefed.structuredContent?.latestDraft === null, briefed.structuredContent?.latestDraft);
+    check('no draft is stored yet', briefed.structuredContent?.latestDraft === null, briefed.structuredContent?.latestDraft);
+
+    console.log('\nRendering the draft');
+    const draftText = 'Dear Acme Foundation, thank you for supporting our education programme.';
+    const rendered = await client.callTool({
+        name: 'render_draft',
+        arguments: { sessionId: generationSessionId, text: draftText },
+    });
+    check('render_draft returns a version', rendered.structuredContent?.versionCount === 1, rendered.structuredContent);
+
+    const ready = await client.callTool({ name: 'get_session', arguments: { sessionId: generationSessionId } });
+    check('session is ready', ready.structuredContent?.status === 'ready', ready.structuredContent);
+    check('draft is stored', ready.structuredContent?.latestDraft === draftText);
 
     console.log('\nRefinement');
-    // The server keeps no draft, so a refinement brief is only as good as the
-    // text the model hands back.
-    const draftText = 'Dear Acme Foundation, thank you for supporting our education programme.';
     const refine = await client.callTool({
         name: 'request_generation',
-        arguments: { sessionId: generationSessionId, userRequest: 'Make it warmer.', existingDraft: draftText },
+        arguments: { sessionId: generationSessionId, userRequest: 'Make it warmer.' },
     });
     check(
-        'refinement brief includes the draft the model passed back',
+        'refinement brief picks up the stored draft',
         refine.structuredContent?.generationBrief?.existingDraft === draftText,
         refine.structuredContent?.generationBrief?.existingDraft,
     );
@@ -225,6 +257,35 @@ try {
         refine.structuredContent?.generationBrief?.funders?.[0] === ws.funders[0].name,
         refine.structuredContent?.generationBrief?.funders,
     );
+    // A model refining something it never rendered is holding the newer text.
+    const heldByModel = await client.callTool({
+        name: 'request_generation',
+        arguments: {
+            sessionId: generationSessionId,
+            userRequest: 'Make it warmer.',
+            existingDraft: 'A newer draft the model never rendered.',
+        },
+    });
+    check(
+        'an explicit draft beats the stored one',
+        heldByModel.structuredContent?.generationBrief?.existingDraft ===
+            'A newer draft the model never rendered.',
+        heldByModel.structuredContent?.generationBrief?.existingDraft,
+    );
+
+    console.log('\nSession list');
+    const listed = (await client.callTool({ name: 'list_sessions', arguments: {} })).structuredContent;
+    const listedSession = listed?.sessions?.find(row => row.sessionId === generationSessionId);
+    check('the session is listed', listedSession !== undefined, listed?.sessions?.length);
+    // Ids are resolved server-side; a panel showing raw record ids is useless.
+    check('the listing resolves names', listedSession?.funders?.[0] === ws.funders[0].name, listedSession?.funders);
+    check(
+        'the listing resolves the document type',
+        listedSession?.documentType === ws.documentTypes[0].name,
+        listedSession?.documentType,
+    );
+    check('the listing previews the draft', typeof listedSession?.latestDraftPreview === 'string');
+    check('the listing counts versions', listedSession?.versionCount === 1, listedSession?.versionCount);
 
     console.log('\nOpportunity-only session');
     // The panel no longer gates opportunities behind a funder, so a session can
@@ -311,10 +372,12 @@ try {
 
     console.log('\nSpike metrics');
     const stats = await (await fetch(`${baseUrl}/stats`)).json();
-    check('three briefs recorded', stats.overall.briefs === 3, stats.overall);
-    check('one refinement recorded', stats.overall.refinements === 1, stats.overall);
+    check('four briefs recorded', stats.overall.briefs === 4, stats.overall);
+    check('one draft rendered', stats.overall.rendered === 1, stats.overall);
+    check('two refinements recorded', stats.overall.refinements === 2, stats.overall);
     check('variant is attributed', stats.byVariant['ui-tool-call'].briefs === 1, stats.byVariant);
     check('refinement is flagged', stats.runs.some(run => run.isRefinement === true));
+    check('a rendered run is timed', stats.runs.some(run => typeof run.durationMs === 'number'));
 
     const statsText = await (await fetch(`${baseUrl}/stats?format=text`)).text();
     check('text report renders', statsText.includes('Stage 2 — generation orchestration'));
