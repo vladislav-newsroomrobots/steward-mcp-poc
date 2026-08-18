@@ -39,6 +39,13 @@ export interface LinkedOpportunity {
     role?: string;
 }
 
+/** The other direction: what `get_linked_objects` returns for an opportunity. */
+export interface LinkedFunder {
+    id: string;
+    name: string;
+    lastGrantAmount?: string;
+}
+
 /** Pre-written draft for demo mode. `*` matches anything. */
 export interface FallbackDraft {
     documentTypeId: string;
@@ -77,11 +84,17 @@ export interface SessionEvent {
     at: string;
 }
 
-/** What the user asked for. Ids resolve against the workspace fixtures. */
+/**
+ * What the user asked for. Ids resolve against the workspace fixtures.
+ *
+ * Both sides are plural and neither gates the other: a session can target
+ * several funders, several opportunities, or a set of opportunities whose
+ * funders were never picked by hand.
+ */
 export interface SessionInputs {
     documentTypeId: string;
-    funderId: string;
-    dealId?: string;
+    funderIds: string[];
+    dealIds: string[];
     userRequest: string;
     wordLimit: number;
 }
@@ -101,7 +114,7 @@ export interface Session {
 /** The package handed to the host model, which does the actual writing. */
 export interface GenerationBrief {
     documentType: string;
-    funder: string;
+    funders: string[];
     /** The document type's `systemInstructions`, authored by the team. */
     instructions: string;
     /** Curated funder and opportunity facts from the CRM payload. */

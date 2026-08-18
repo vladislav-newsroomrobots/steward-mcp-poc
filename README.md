@@ -200,8 +200,8 @@ itself needs no change.
 | Name | Visible to | Purpose |
 |---|---|---|
 | `open_steward` | model, app | entry point; renders `ui://steward/app.html` in the conversation |
-| `get_workspace` | model, app | document types and funders; resolves a name the user said into an id |
-| `get_linked_objects` | model, app | the opportunities linked to a funder |
+| `get_workspace` | model, app | document types, funders and opportunities; resolves a name the user said into an id |
+| `get_linked_objects` | model, app | follows the funder ↔ opportunity link in either direction |
 | `request_generation` | model, app | returns the generation brief the model writes from |
 | `create_session` | app | opens a drafting session |
 | `get_session` | app | session state for the panel |
@@ -239,6 +239,27 @@ The `raw` payload carries every column of the export, most of it plumbing.
 `buildGenerationBrief` projects a curated subset into the brief: giving history,
 contact, funder type, notes, and the opportunity's stage, amounts and next step.
 Passing `raw` wholesale would bury the few facts that change the prose.
+
+### Funders and opportunities
+
+Each side is a picker that adds to a row of chips, and the chips carry an × to
+take one back off. Neither side gates the other: an opportunity can be the first
+thing picked in an empty panel. That is why `get_workspace` ships the
+opportunities alongside the funders — there is no funder selection to load them
+from.
+
+Adding on one side pulls the other in. Add a funder and its opportunities appear
+as chips; add an opportunity and the funder behind it does. `get_linked_objects`
+follows that link in either direction, one hop only — a funder arriving from an
+opportunity does not then drag in its other opportunities. The hop runs for the
+row just added rather than the whole selection, so a chip removed by hand is not
+resurrected by the next add.
+
+The server does the same join rather than trusting the panel to have done it:
+`request_generation` accepts `funderIds`, `dealIds`, or both, and fills in the
+funders behind any opportunity that arrived without one. A brief needs the
+giving history to write from, and a request that names only a deal would
+otherwise lose it.
 
 ## The generation cycle
 
@@ -338,8 +359,8 @@ works on fixture data, with refinement and both orchestration variants. Briefs
 carry the document type's own instructions plus real funder and opportunity
 context, so draft quality reflects what the product would actually produce.
 
-The widget has document type, funder and opportunity pickers and surfaces the
-writing tips, but it is context only — it never shows a draft — and it is still
+The widget has a document type picker, chip-based funder and opportunity
+selection, and surfaces the writing tips, but it is context only — it never shows a draft — and it is still
 a spike harness rather than the real interface. That is stage 4. Manual editing,
 version history, feedback and copy tracking are stage 5; the session store
 already implements them and they are covered by the smoke check ahead of the

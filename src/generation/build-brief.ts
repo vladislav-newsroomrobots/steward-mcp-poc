@@ -2,8 +2,8 @@ import type { Deal, DocumentType, Funder, GenerationBrief } from '../types/index
 
 interface BuildInput {
     documentType: DocumentType;
-    funder: Funder;
-    deal?: Deal;
+    funders: Funder[];
+    deals: Deal[];
     userRequest: string;
     wordLimit: number;
     existingDraft?: string;
@@ -62,23 +62,38 @@ function project(raw: Record<string, unknown>, fields: readonly string[]): Recor
  */
 export function buildGenerationBrief({
     documentType,
-    funder,
-    deal,
+    funders,
+    deals,
     userRequest,
     wordLimit,
     existingDraft,
 }: BuildInput): GenerationBrief {
     return {
         documentType: documentType.name,
-        funder: funder.name,
+        funders: funders.map(funder => funder.name),
         // The document type's own prompt, authored by the fundraising team —
         // not something this function should paraphrase or wrap.
         instructions: documentType.systemInstructions,
         context: {
-            funder: { name: funder.name, ...project(funder.raw, FUNDER_FIELDS) },
-            ...(deal === undefined
+            funders: funders.map(funder => ({
+                name: funder.name,
+                ...project(funder.raw, FUNDER_FIELDS),
+            })),
+            // Opportunities carry the funder they belong to: with several of
+            // each in one brief, the model cannot otherwise tell which giving
+            // history goes with which ask.
+            ...(deals.length === 0
                 ? {}
-                : { opportunity: { title: deal.title, ...project(deal.raw, DEAL_FIELDS) } }),
+                : {
+                      opportunities: deals.map(deal => {
+                          const owner = funders.find(funder => funder.id === deal.funderId);
+                          return {
+                              title: deal.title,
+                              ...(owner === undefined ? {} : { funder: owner.name }),
+                              ...project(deal.raw, DEAL_FIELDS),
+                          };
+                      }),
+                  }),
         },
         constraints: {
             wordLimit,

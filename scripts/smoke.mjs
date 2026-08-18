@@ -94,6 +94,9 @@ try {
     const ws = (await client.callTool({ name: 'get_workspace', arguments: {} })).structuredContent;
     check('document types load', ws?.documentTypes?.length >= 3, ws?.documentTypes?.length);
     check('funders load', ws?.funders?.length >= 5, ws?.funders?.length);
+    // Opportunities ship with the workspace now: the panel lets them be picked
+    // before any funder is, so there is no later moment to fetch them.
+    check('opportunities load', ws?.opportunities?.length >= 5, ws?.opportunities?.length);
     check('document types carry tips', ws?.documentTypes?.every(t => t.tips?.length > 0));
     // systemInstructions are prompt material the server injects, not something
     // the model should read back or paraphrase.
@@ -102,13 +105,32 @@ try {
     const funderId = ws.funders[0].id;
     const documentTypeId = ws.documentTypes[0].id;
 
-    const linked = (await client.callTool({ name: 'get_linked_objects', arguments: { funderId } }))
+    const linked = (await client.callTool({ name: 'get_linked_objects', arguments: { funderIds: [funderId] } }))
         .structuredContent;
     check('funder has opportunities', linked?.opportunities?.length > 0, linked?.opportunities?.length);
     check('opportunities carry a stage', linked.opportunities.every(o => typeof o.stage === 'string'));
 
-    const badFunder = await client.callTool({ name: 'get_linked_objects', arguments: { funderId: 'nope' } });
+    // The same hop backwards: an opportunity picked on its own has to resolve
+    // to the funder behind it, or the brief loses the giving history.
+    const dealId = linked.opportunities[0].id;
+    const back = (await client.callTool({ name: 'get_linked_objects', arguments: { dealIds: [dealId] } }))
+        .structuredContent;
+    check('opportunity resolves to its funder', back?.funders?.[0]?.id === funderId, back?.funders);
+    check('reverse lookup returns no opportunities', back?.opportunities?.length === 0, back?.opportunities);
+
+    const bothWays = (
+        await client.callTool({ name: 'get_linked_objects', arguments: { funderIds: [funderId], dealIds: [dealId] } })
+    ).structuredContent;
+    check('both directions can be asked at once', bothWays?.funders?.length === 1 && bothWays?.opportunities?.length > 0);
+
+    const badFunder = await client.callTool({ name: 'get_linked_objects', arguments: { funderIds: ['nope'] } });
     check('unknown funder is an MCP error', badFunder.isError === true);
+
+    const badDeal = await client.callTool({ name: 'get_linked_objects', arguments: { dealIds: ['nope'] } });
+    check('unknown opportunity is an MCP error', badDeal.isError === true);
+
+    const nothingToFollow = await client.callTool({ name: 'get_linked_objects', arguments: {} });
+    check('empty lookup is an MCP error', nothingToFollow.isError === true);
 
     // Fixtures are hand-maintained JSON, so nothing but this stops a deal from
     // pointing at a funder that no longer exists.
@@ -123,8 +145,8 @@ try {
     console.log('\nGeneration cycle');
     const inputs = {
         documentTypeId,
-        funderId,
-        dealId: linked.opportunities[0].id,
+        funderIds: [funderId],
+        dealIds: [dealId],
         userRequest: 'Mention the county-government desk.',
         wordLimit: 300,
     };
@@ -138,7 +160,11 @@ try {
         arguments: { sessionId: generationSessionId, ...inputs, variant: 'ui-tool-call' },
     });
     const generationBrief = brief.structuredContent?.generationBrief;
-    check('request_generation returns a brief', generationBrief?.funder === ws.funders[0].name, generationBrief?.funder);
+    check(
+        'request_generation returns a brief',
+        generationBrief?.funders?.[0] === ws.funders[0].name,
+        generationBrief?.funders,
+    );
     check('brief carries the word limit', generationBrief?.constraints?.wordLimit === 300, generationBrief?.constraints);
     check('first brief has no existing draft', generationBrief?.existingDraft === undefined);
     check(
@@ -146,11 +172,26 @@ try {
         typeof generationBrief?.instructions === 'string' && generationBrief.instructions.length > 200,
         generationBrief?.instructions?.length,
     );
-    check('brief carries funder context', generationBrief?.context?.funder?.funderType !== undefined, generationBrief?.context?.funder);
-    check('brief carries opportunity context', generationBrief?.context?.opportunity?.stage !== undefined, generationBrief?.context?.opportunity);
+    check(
+        'brief carries funder context',
+        generationBrief?.context?.funders?.[0]?.funderType !== undefined,
+        generationBrief?.context?.funders,
+    );
+    check(
+        'brief carries opportunity context',
+        generationBrief?.context?.opportunities?.[0]?.stage !== undefined,
+        generationBrief?.context?.opportunities,
+    );
+    // With several of each in one brief, an opportunity has to name the funder
+    // it belongs to or the model cannot pair them up.
+    check(
+        'opportunities name their funder',
+        generationBrief?.context?.opportunities?.[0]?.funder === ws.funders[0].name,
+        generationBrief?.context?.opportunities?.[0]?.funder,
+    );
     // The CRM export is mostly plumbing; only fields a fundraiser would use
     // belong in the brief.
-    check('brief omits CRM plumbing', generationBrief?.context?.funder?.sourceSystem === undefined);
+    check('brief omits CRM plumbing', generationBrief?.context?.funders?.[0]?.sourceSystem === undefined);
     const nextStep = brief.structuredContent?.nextStep;
     check('result tells the model to continue', typeof nextStep === 'string' && nextStep.includes('Do not stop here'));
     // The draft is the model's to show. The instruction has to say so, and it
@@ -181,7 +222,38 @@ try {
     );
     check(
         'omitted fields fall back to the session',
-        refine.structuredContent?.generationBrief?.funder === ws.funders[0].name,
+        refine.structuredContent?.generationBrief?.funders?.[0] === ws.funders[0].name,
+        refine.structuredContent?.generationBrief?.funders,
+    );
+
+    console.log('\nOpportunity-only session');
+    // The panel no longer gates opportunities behind a funder, so a session can
+    // arrive with only deals picked. The funder behind them has to be filled in
+    // server-side, or the brief goes out without any giving history.
+    const dealOnly = await client.callTool({
+        name: 'create_session',
+        arguments: {
+            documentTypeId,
+            dealIds: [dealId],
+            userRequest: 'Mention the county-government desk.',
+            wordLimit: 300,
+        },
+    });
+    const dealOnlyBrief = (
+        await client.callTool({
+            name: 'request_generation',
+            arguments: { sessionId: dealOnly.structuredContent?.sessionId },
+        })
+    ).structuredContent?.generationBrief;
+    check(
+        'a deal-only session derives its funder',
+        dealOnlyBrief?.funders?.[0] === ws.funders[0].name,
+        dealOnlyBrief?.funders,
+    );
+    check(
+        'the chosen opportunity is still in the brief',
+        dealOnlyBrief?.context?.opportunities?.length === 1,
+        dealOnlyBrief?.context?.opportunities,
     );
 
     console.log('\nGeneration errors');
@@ -190,6 +262,16 @@ try {
         arguments: { sessionId: 'does-not-exist' },
     });
     check('unknown session is an MCP error', unknownSessionCall.isError === true, unknownSessionCall.isError);
+
+    const noTarget = await client.callTool({
+        name: 'create_session',
+        arguments: { documentTypeId, userRequest: 'Anything.', wordLimit: 300 },
+    });
+    const noTargetBrief = await client.callTool({
+        name: 'request_generation',
+        arguments: { sessionId: noTarget.structuredContent?.sessionId },
+    });
+    check('a session with neither funders nor deals is an MCP error', noTargetBrief.isError === true);
 
     // Exercised directly: the tools that expose these land in stage 5, and
     // shipping the store untested until then invites a nasty surprise.
@@ -229,7 +311,7 @@ try {
 
     console.log('\nSpike metrics');
     const stats = await (await fetch(`${baseUrl}/stats`)).json();
-    check('two briefs recorded', stats.overall.briefs === 2, stats.overall);
+    check('three briefs recorded', stats.overall.briefs === 3, stats.overall);
     check('one refinement recorded', stats.overall.refinements === 1, stats.overall);
     check('variant is attributed', stats.byVariant['ui-tool-call'].briefs === 1, stats.byVariant);
     check('refinement is flagged', stats.runs.some(run => run.isRefinement === true));

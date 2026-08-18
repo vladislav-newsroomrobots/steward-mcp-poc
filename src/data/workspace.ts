@@ -3,7 +3,14 @@ import { join } from 'node:path';
 
 import { StewardError } from '../errors.js';
 import { PROJECT_ROOT } from '../paths.js';
-import type { Deal, DocumentType, FallbackDraft, Funder, LinkedOpportunity } from '../types/index.js';
+import type {
+    Deal,
+    DocumentType,
+    FallbackDraft,
+    Funder,
+    LinkedFunder,
+    LinkedOpportunity,
+} from '../types/index.js';
 
 /**
  * Fixture-backed workspace data.
@@ -40,9 +47,15 @@ const funderIndex = byId(funders);
 const dealIndex = byId(deals);
 
 export const workspace = {
-    /** Everything the widget needs on load: `get_workspace`. */
-    summary(): { documentTypes: DocumentType[]; funders: Funder[] } {
-        return { documentTypes, funders };
+    /**
+     * Everything the widget needs on load: `get_workspace`.
+     *
+     * Opportunities ship with it because the panel lets them be picked without
+     * a funder, so there is no earlier moment to load them. Which funder each
+     * one belongs to is deliberately left out — that hop stays a server call.
+     */
+    summary(): { documentTypes: DocumentType[]; funders: Funder[]; deals: Deal[] } {
+        return { documentTypes, funders, deals };
     },
 
     documentType(id: string): DocumentType {
@@ -69,18 +82,37 @@ export const workspace = {
         return found;
     },
 
-    /** One hop from a funder to its deals: `get_linked_objects`. */
-    linkedDeals(funderId: string): LinkedOpportunity[] {
-        this.funder(funderId);
+    /** One hop from funders to their deals: `get_linked_objects`. */
+    linkedDeals(funderIds: string[]): LinkedOpportunity[] {
+        const wanted = new Set(funderIds);
+        for (const id of wanted) {
+            this.funder(id);
+        }
 
         return deals
-            .filter(deal => deal.funderId === funderId)
+            .filter(deal => wanted.has(deal.funderId))
             .map(deal => ({
                 id: deal.id,
                 title: deal.title,
                 ...(deal.stage === undefined ? {} : { stage: deal.stage }),
                 ...(deal.isPrimary === undefined ? {} : { isPrimary: deal.isPrimary }),
             }));
+    },
+
+    /**
+     * The same hop backwards: the funders behind a set of opportunities.
+     *
+     * The panel needs it because opportunities can be picked on their own, and
+     * a brief written without the funder behind them would be missing the giving
+     * history that shapes the prose.
+     */
+    linkedFunders(dealIds: string[]): LinkedFunder[] {
+        const funderIds = new Set(dealIds.map(id => this.deal(id).funderId));
+
+        return [...funderIds].map(id => {
+            const { name, lastGrantAmount } = this.funder(id);
+            return { id, name, ...(lastGrantAmount === undefined ? {} : { lastGrantAmount }) };
+        });
     },
 
     /**

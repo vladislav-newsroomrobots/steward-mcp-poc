@@ -16,6 +16,9 @@ interface RequestGenerationInput extends Partial<SessionInputs> {
     variant?: OrchestrationVariant;
 }
 
+/** Deduplicates while keeping the order the user picked things in. */
+const unique = (ids: string[]): string[] => [...new Set(ids)];
+
 /**
  * The instruction that decides whether the cycle completes.
  *
@@ -49,8 +52,8 @@ export function registerRequestGenerationTool(server: McpServer): void {
             inputSchema: {
                 sessionId: z.string(),
                 documentTypeId: z.string().optional(),
-                funderId: z.string().optional(),
-                dealId: z.string().optional(),
+                funderIds: z.array(z.string()).optional(),
+                dealIds: z.array(z.string()).optional(),
                 userRequest: z.string().optional(),
                 wordLimit: z.number().int().positive().max(5000).optional(),
                 existingDraft: z
@@ -69,7 +72,7 @@ export function registerRequestGenerationTool(server: McpServer): void {
                 runId: z.string(),
                 generationBrief: z.object({
                     documentType: z.string(),
-                    funder: z.string(),
+                    funders: z.array(z.string()),
                     instructions: z.string(),
                     context: z.record(z.unknown()),
                     constraints: z.record(z.unknown()),
@@ -90,7 +93,6 @@ export function registerRequestGenerationTool(server: McpServer): void {
             // have nothing to do with the orchestration being measured.
             const merged = {
                 documentTypeId: input.documentTypeId ?? session.inputs.documentTypeId,
-                funderId: input.funderId ?? session.inputs.funderId,
                 userRequest: input.userRequest ?? session.inputs.userRequest,
                 wordLimit: input.wordLimit ?? session.inputs.wordLimit,
             };
@@ -99,6 +101,15 @@ export function registerRequestGenerationTool(server: McpServer): void {
                 .filter(([, value]) => value === undefined || value === '')
                 .map(([key]) => key);
 
+            const dealIds = unique(input.dealIds ?? session.inputs.dealIds ?? []);
+            const pickedFunderIds = unique(input.funderIds ?? session.inputs.funderIds ?? []);
+
+            // Either side is enough on its own. Requiring funders would put back
+            // the gate the panel just dropped.
+            if (pickedFunderIds.length === 0 && dealIds.length === 0) {
+                missing.push('funderIds or dealIds');
+            }
+
             if (missing.length > 0) {
                 throw new StewardError(
                     'MISSING_GENERATION_INPUT',
@@ -106,18 +117,27 @@ export function registerRequestGenerationTool(server: McpServer): void {
                 );
             }
 
-            const dealId = input.dealId ?? session.inputs.dealId;
-            const inputs: SessionInputs = {
-                ...(merged as Omit<SessionInputs, 'dealId'>),
-                ...(dealId === undefined ? {} : { dealId }),
-            };
-
             // Unknown ids throw here, before a run is recorded — a bad id is a
             // caller error, not a generation attempt, and counting it as one
             // would corrupt the orchestration numbers.
+            //
+            // The funders behind the chosen opportunities are added rather than
+            // assumed: an opportunity can be picked without its funder, and the
+            // giving history behind it is what shapes the prose.
+            const funderIds = unique([
+                ...pickedFunderIds,
+                ...workspace.linkedFunders(dealIds).map(linked => linked.id),
+            ]);
+
+            const inputs: SessionInputs = {
+                ...(merged as Omit<SessionInputs, 'funderIds' | 'dealIds'>),
+                funderIds,
+                dealIds,
+            };
+
             const documentType = workspace.documentType(inputs.documentTypeId);
-            const funder = workspace.funder(inputs.funderId);
-            const deal = inputs.dealId === undefined ? undefined : workspace.deal(inputs.dealId);
+            const funders = inputs.funderIds.map(id => workspace.funder(id));
+            const deals = inputs.dealIds.map(id => workspace.deal(id));
 
             // The model's own copy comes first: drafts live in the conversation
             // now, so the store only holds a version if something else put one
@@ -126,8 +146,8 @@ export function registerRequestGenerationTool(server: McpServer): void {
 
             const generationBrief = buildGenerationBrief({
                 documentType,
-                funder,
-                ...(deal === undefined ? {} : { deal }),
+                funders,
+                deals,
                 userRequest: inputs.userRequest,
                 wordLimit: inputs.wordLimit,
                 ...(existingDraft === undefined ? {} : { existingDraft }),

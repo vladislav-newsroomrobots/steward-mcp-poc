@@ -23,8 +23,6 @@ const tipsEl = el('tips');
 
 const fields = {
     documentType: el<HTMLSelectElement>('documentType'),
-    funder: el<HTMLSelectElement>('funder'),
-    deal: el<HTMLSelectElement>('deal'),
     userRequest: el<HTMLTextAreaElement>('userRequest'),
     wordLimit: el<HTMLInputElement>('wordLimit'),
 };
@@ -33,6 +31,25 @@ interface DocumentTypeOption {
     id: string;
     name: string;
     tips: string[];
+}
+
+/**
+ * One side of the funder ↔ opportunity pair.
+ *
+ * The two behave identically — a picker that adds, chips that remove, and a hop
+ * to the other side on every add — so they are one structure used twice rather
+ * than two near-copies of the same handlers.
+ */
+interface Picker {
+    picker: HTMLSelectElement;
+    chips: HTMLElement;
+    /** Everything selectable, id → label, in workspace order. */
+    catalog: Map<string, string>;
+    /** What is currently chosen, id → label. */
+    chosen: Map<string, string>;
+    addLabel: string;
+    /** Called with a newly added id, to pull in what it links to. */
+    onAdd(id: string): Promise<void>;
 }
 
 let documentTypes: DocumentTypeOption[] = [];
@@ -66,25 +83,133 @@ function describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
+async function callTool<T>(name: string, args: Record<string, unknown>): Promise<T> {
+    const result = await app.callServerTool({ name, arguments: args });
+
+    if (result.isError) {
+        const first = result.content?.[0];
+        throw new Error(first && first.type === 'text' ? first.text : `${name} failed`);
+    }
+
+    return result.structuredContent as T;
+}
+
+const funders: Picker = {
+    picker: el<HTMLSelectElement>('funderPicker'),
+    chips: el('funderChips'),
+    catalog: new Map(),
+    chosen: new Map(),
+    addLabel: 'Add a funder…',
+    onAdd: async id => {
+        const { opportunities } = await callTool<{ opportunities: Array<{ id: string; title: string }> }>(
+            'get_linked_objects',
+            { funderIds: [id] },
+        );
+
+        adopt(deals, opportunities.map(o => ({ id: o.id, label: o.title })));
+    },
+};
+
+const deals: Picker = {
+    picker: el<HTMLSelectElement>('dealPicker'),
+    chips: el('dealChips'),
+    catalog: new Map(),
+    chosen: new Map(),
+    addLabel: 'Add an opportunity…',
+    onAdd: async id => {
+        const { funders: linked } = await callTool<{ funders: Array<{ id: string; name: string }> }>(
+            'get_linked_objects',
+            { dealIds: [id] },
+        );
+
+        adopt(funders, linked.map(f => ({ id: f.id, label: f.name })));
+    },
+};
+
+/**
+ * Takes in rows the other side pulled.
+ *
+ * Labels come from the catalog when it has them, so a chip pulled in by a link
+ * reads exactly like one picked by hand. Nothing is ever removed here — what
+ * the user took off stays off.
+ */
+function adopt(side: Picker, rows: Array<{ id: string; label: string }>): void {
+    for (const row of rows) {
+        if (!side.chosen.has(row.id)) {
+            side.chosen.set(row.id, side.catalog.get(row.id) ?? row.label);
+        }
+    }
+
+    render(side);
+}
+
+/** Redraws a side: chips for what is chosen, picker for what is left. */
+function render(side: Picker): void {
+    side.chips.replaceChildren(
+        ...[...side.chosen].map(([id, label]) => {
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.textContent = '×';
+            remove.title = `Remove ${label}`;
+            remove.setAttribute('aria-label', `Remove ${label}`);
+            remove.addEventListener('click', () => {
+                side.chosen.delete(id);
+                render(side);
+            });
+
+            const chip = document.createElement('li');
+            chip.append(label, remove);
+            return chip;
+        }),
+    );
+
+    // Chosen rows leave the picker: offering them again would do nothing, and
+    // the shrinking list is how the panel shows what is left to add.
+    const available = [...side.catalog].filter(([id]) => !side.chosen.has(id));
+
+    side.picker.replaceChildren(
+        new Option(available.length > 0 ? side.addLabel : 'Nothing left to add', ''),
+        ...available.map(([id, label]) => new Option(label, id)),
+    );
+    side.picker.value = '';
+    side.picker.disabled = available.length === 0;
+}
+
+function attachPicker(side: Picker): void {
+    side.picker.addEventListener('change', () => {
+        const id = side.picker.value;
+
+        if (!id) {
+            return;
+        }
+
+        side.chosen.set(id, side.catalog.get(id) ?? id);
+        render(side);
+
+        void (async () => {
+            try {
+                // One hop, and only for the row just added: pulling for the whole
+                // selection would keep resurrecting chips the user removed.
+                await side.onAdd(id);
+            } catch (error) {
+                setMeta(`Could not load linked records: ${describeError(error)}`);
+            }
+        })();
+    });
+}
+
 function readInputs() {
     return {
         documentTypeId: fields.documentType.value,
-        funderId: fields.funder.value,
-        ...(fields.deal.value === '' ? {} : { dealId: fields.deal.value }),
+        funderIds: [...funders.chosen.keys()],
+        dealIds: [...deals.chosen.keys()],
         userRequest: fields.userRequest.value.trim(),
         wordLimit: Number(fields.wordLimit.value),
     };
 }
 
-function fillSelect(
-    select: HTMLSelectElement,
-    options: Array<{ value: string; label: string }>,
-    placeholder?: string,
-): void {
-    select.replaceChildren(
-        ...(placeholder === undefined ? [] : [new Option(placeholder, '')]),
-        ...options.map(option => new Option(option.label, option.value)),
-    );
+function fillSelect(select: HTMLSelectElement, options: Array<{ value: string; label: string }>): void {
+    select.replaceChildren(...options.map(option => new Option(option.label, option.value)));
 }
 
 function showTips(documentTypeId: string): void {
@@ -99,35 +224,6 @@ function showTips(documentTypeId: string): void {
     );
 }
 
-/** Opportunities belong to a funder, so they load only once one is chosen. */
-async function loadDeals(funderId: string): Promise<void> {
-    if (!funderId) {
-        fillSelect(fields.deal, [], 'No funder selected');
-        return;
-    }
-
-    const { opportunities } = await callTool<{
-        opportunities: Array<{ id: string; title: string; stage?: string }>;
-    }>('get_linked_objects', { funderId });
-
-    fillSelect(
-        fields.deal,
-        opportunities.map(o => ({ value: o.id, label: o.stage ? `${o.title} · ${o.stage}` : o.title })),
-        opportunities.length > 0 ? 'None' : 'No linked opportunities',
-    );
-}
-
-async function callTool<T>(name: string, args: Record<string, unknown>): Promise<T> {
-    const result = await app.callServerTool({ name, arguments: args });
-
-    if (result.isError) {
-        const first = result.content?.[0];
-        throw new Error(first && first.type === 'text' ? first.text : `${name} failed`);
-    }
-
-    return result.structuredContent as T;
-}
-
 async function ensureSession(inputs: ReturnType<typeof readInputs>): Promise<string> {
     if (sessionId) {
         return sessionId;
@@ -140,10 +236,11 @@ async function ensureSession(inputs: ReturnType<typeof readInputs>): Promise<str
 
 async function generate(): Promise<void> {
     const inputs = readInputs();
+    const hasTarget = inputs.funderIds.length > 0 || inputs.dealIds.length > 0;
 
-    if (!inputs.documentTypeId || !inputs.funderId || !inputs.userRequest) {
+    if (!inputs.documentTypeId || !hasTarget || !inputs.userRequest) {
         setStatus('error', 'Fill in the fields');
-        setMeta('Document type, funder and request are all required.');
+        setMeta('Document type, a request, and at least one funder or opportunity are required.');
         return;
     }
 
@@ -167,8 +264,8 @@ async function generate(): Promise<void> {
                         'Steward request — please handle this now.',
                         `sessionId: ${id}`,
                         `documentTypeId: ${inputs.documentTypeId}`,
-                        `funderId: ${inputs.funderId}`,
-                        ...(inputs.dealId === undefined ? [] : [`dealId: ${inputs.dealId}`]),
+                        `funderIds: ${inputs.funderIds.join(', ') || 'none'}`,
+                        `dealIds: ${inputs.dealIds.join(', ') || 'none'}`,
                         `Word limit: ${inputs.wordLimit}`,
                         `Request: ${inputs.userRequest}`,
                         '',
@@ -195,23 +292,15 @@ generateButton.addEventListener('click', () => void generate());
 
 fields.documentType.addEventListener('change', () => showTips(fields.documentType.value));
 
-fields.funder.addEventListener('change', () => {
-    void (async () => {
-        // A stale opportunity from the previous funder would silently poison
-        // the brief, so clear before loading rather than after.
-        fillSelect(fields.deal, [], 'Loading…');
-
-        try {
-            await loadDeals(fields.funder.value);
-        } catch (error) {
-            fillSelect(fields.deal, [], 'Could not load opportunities');
-            setMeta(describeError(error));
-        }
-    })();
-});
+attachPicker(funders);
+attachPicker(deals);
 
 resetButton.addEventListener('click', () => {
     sessionId = null;
+    funders.chosen.clear();
+    deals.chosen.clear();
+    render(funders);
+    render(deals);
     setMeta('New session will be created on the next generate.');
     setStatus('connected', 'Connected');
     generateButton.disabled = false;
@@ -235,19 +324,30 @@ try {
     const ws = await callTool<{
         documentTypes: DocumentTypeOption[];
         funders: Array<{ id: string; name: string; lastGrantAmount?: string }>;
+        opportunities: Array<{ id: string; title: string; stage?: string }>;
     }>('get_workspace', {});
 
     documentTypes = ws.documentTypes;
     fillSelect(fields.documentType, documentTypes.map(t => ({ value: t.id, label: t.name })));
-    fillSelect(
-        fields.funder,
-        ws.funders.map(f => ({
-            value: f.id,
-            label: f.lastGrantAmount ? `${f.name} · ${f.lastGrantAmount}` : f.name,
-        })),
-        'Select a funder',
-    );
-    fillSelect(fields.deal, [], 'No funder selected');
+
+    // Both catalogues arrive filled: an opportunity can be the first thing
+    // picked, so there is no funder selection to load them from.
+    for (const funder of ws.funders) {
+        funders.catalog.set(
+            funder.id,
+            funder.lastGrantAmount ? `${funder.name} · ${funder.lastGrantAmount}` : funder.name,
+        );
+    }
+
+    for (const opportunity of ws.opportunities) {
+        deals.catalog.set(
+            opportunity.id,
+            opportunity.stage ? `${opportunity.title} · ${opportunity.stage}` : opportunity.title,
+        );
+    }
+
+    render(funders);
+    render(deals);
     showTips(fields.documentType.value);
 
     generateButton.disabled = false;
