@@ -240,30 +240,19 @@
                     <textarea id="userRequest" placeholder="Thank her for the first gift and mention the county-government desk."></textarea>
                 </label>
 
-                <div class="row">
-                    <label
-                        >Word limit
-                        <input id="wordLimit" type="number" min="50" max="2000" step="50" value="300" />
-                    </label>
-                    <label
-                        >Orchestration
-                        <select id="variant">
-                            <option value="conversation">B — conversation continuation</option>
-                            <option value="ui-tool-call">A — UI tool call</option>
-                        </select>
-                    </label>
-                </div>
+                <label
+                    >Word limit
+                    <input id="wordLimit" type="number" min="50" max="2000" step="50" value="300" />
+                </label>
 
                 <div class="actions">
                     <button id="generate" type="button" disabled>Generate</button>
                     <button id="reset" class="secondary" type="button" disabled>New session</button>
-                    <button id="ping" class="secondary" type="button" disabled>Ping</button>
                 </div>
             </fieldset>
 
             <hr />
 
-            <p class="meta">The draft is written in the chat, not here.</p>
             <div class="meta" id="meta"></div>
         </div>
         <!--APP_SCRIPT-->

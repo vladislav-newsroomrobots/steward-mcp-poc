@@ -2,16 +2,14 @@ import { App, PostMessageTransport } from '@modelcontextprotocol/ext-apps';
 
 /**
  * Stage 2 widget: a deliberately plain harness for the generation orchestration
- * spike. It exists to run the two variants side by side — the real Steward
- * interface arrives in stage 4.
+ * spike — the real Steward interface arrives in stage 4.
  *
  * It never shows a draft. The model writes the document in the conversation and
- * offers it there, so the panel only gathers context and sends the brief.
+ * offers it there, so the panel only gathers context and hands over the request.
  */
 
 const CONNECT_TIMEOUT_MS = 15_000;
 
-type Variant = 'ui-tool-call' | 'conversation';
 type Status = 'connecting' | 'connected' | 'briefed' | 'error';
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -20,7 +18,6 @@ const statusEl = el('status');
 const metaEl = el('meta');
 const generateButton = el<HTMLButtonElement>('generate');
 const resetButton = el<HTMLButtonElement>('reset');
-const pingButton = el<HTMLButtonElement>('ping');
 
 const tipsEl = el('tips');
 
@@ -30,7 +27,6 @@ const fields = {
     deal: el<HTMLSelectElement>('deal'),
     userRequest: el<HTMLTextAreaElement>('userRequest'),
     wordLimit: el<HTMLInputElement>('wordLimit'),
-    variant: el<HTMLSelectElement>('variant'),
 };
 
 interface DocumentTypeOption {
@@ -151,7 +147,6 @@ async function generate(): Promise<void> {
         return;
     }
 
-    const variant = fields.variant.value as Variant;
     generateButton.disabled = true;
     setStatus('connected', 'Sending brief…');
     setMeta('');
@@ -159,34 +154,30 @@ async function generate(): Promise<void> {
     try {
         const id = await ensureSession(inputs);
 
-        if (variant === 'ui-tool-call') {
-            // Variant A: the widget asks for the brief itself, and the model has
-            // to notice the tool result and carry on unprompted.
-            await callTool('request_generation', { sessionId: id, ...inputs, variant });
-        } else {
-            // Variant B: hand the work back to the conversation and let the model
-            // drive the whole cycle, which is the path hosts are tuned for.
-            await app.sendMessage({
-                role: 'user',
-                content: [
-                    {
-                        type: 'text',
-                        text: [
-                            'Steward request — please handle this now.',
-                            `sessionId: ${id}`,
-                            `documentTypeId: ${inputs.documentTypeId}`,
-                            `funderId: ${inputs.funderId}`,
-                            ...(inputs.dealId === undefined ? [] : [`dealId: ${inputs.dealId}`]),
-                            `Word limit: ${inputs.wordLimit}`,
-                            `Request: ${inputs.userRequest}`,
-                            '',
-                            'Call request_generation with that sessionId, write the document,',
-                            'then tell me it is ready and ask before showing it.',
-                        ].join('\n'),
-                    },
-                ],
-            });
-        }
+        // Variant B: hand the work back to the conversation and let the model
+        // drive the whole cycle, which is the path hosts are tuned for. Variant A
+        // — the widget calling request_generation itself — is still accepted by
+        // the server, but the panel no longer offers it.
+        await app.sendMessage({
+            role: 'user',
+            content: [
+                {
+                    type: 'text',
+                    text: [
+                        'Steward request — please handle this now.',
+                        `sessionId: ${id}`,
+                        `documentTypeId: ${inputs.documentTypeId}`,
+                        `funderId: ${inputs.funderId}`,
+                        ...(inputs.dealId === undefined ? [] : [`dealId: ${inputs.dealId}`]),
+                        `Word limit: ${inputs.wordLimit}`,
+                        `Request: ${inputs.userRequest}`,
+                        '',
+                        'Call request_generation with that sessionId, write the document,',
+                        'then tell me it is ready and ask before showing it.',
+                    ].join('\n'),
+                },
+            ],
+        });
 
         // Nothing to wait for: the model writes the draft in the conversation and
         // offers it there, so the panel's job ends with the brief.
@@ -226,17 +217,6 @@ resetButton.addEventListener('click', () => {
     generateButton.disabled = false;
 });
 
-pingButton.addEventListener('click', () => {
-    void (async () => {
-        try {
-            const pong = await callTool<{ message: string }>('ping', {});
-            setMeta(`ping → ${pong.message}`);
-        } catch (error) {
-            setMeta(`ping failed: ${describeError(error)}`);
-        }
-    })();
-});
-
 try {
     // Raced against a deadline: `ui/initialize` inherits a long protocol
     // timeout, and a silent multi-minute wait is indistinguishable from a dead
@@ -272,7 +252,6 @@ try {
 
     generateButton.disabled = false;
     resetButton.disabled = false;
-    pingButton.disabled = false;
 } catch (error) {
     setStatus('error', 'Connection failed');
     setMeta(describeError(error));

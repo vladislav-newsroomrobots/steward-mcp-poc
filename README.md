@@ -185,9 +185,9 @@ Call open_steward with funderId "acme"
 ```
 
 The strongest confirmation is the server log rather than the panel: opening
-Steward and clicking **Ping server** must produce both a `"tool":"open_steward"`
-and a `"tool":"ping"` line. The second one proves the call travelled from the
-iframe through the host into the server.
+Steward must produce both a `"tool":"open_steward"` and a `"tool":"get_workspace"`
+line. The second one is the widget loading its pickers, which proves the call
+travelled from the iframe through the host into the server.
 
 ### After a tunnel restart
 
@@ -266,11 +266,13 @@ edit created one (stage 5). Refinement therefore depends on the model passing
 the text back: `request_generation` takes an optional `existingDraft`, and
 without it the brief is written from scratch.
 
-Two orchestration variants are implemented, switchable in the widget:
+Two orchestration variants exist. The panel drives B; A is still accepted by
+`request_generation` and exercised by the smoke check, but nothing in the widget
+selects it any more:
 
 | Variant | How it starts | Trade-off |
 |---|---|---|
-| A — UI tool call | the widget calls `request_generation` itself | fewest moving parts, but the model must notice the tool result and continue unprompted |
+| A — UI tool call | a caller passes `variant: "ui-tool-call"` to `request_generation` | fewest moving parts, but the model must notice the tool result and continue unprompted |
 | B — conversation | the widget sends a follow-up message via `ui/message` | the model drives the whole cycle, which is the path hosts are tuned for |
 
 ### Measuring reliability
@@ -352,9 +354,9 @@ That is what the matrix below is for, and it is read by eye.
 ### Running the reliability matrix
 
 Restart the server first so the counters start clean, then, from ChatGPT, run
-the documented spread per variant. For each run, note by hand whether the model
-wrote the document, offered it in one short sentence, and waited for the user
-before printing it:
+the documented spread through the panel (variant B). For each run, note by hand
+whether the model wrote the document, offered it in one short sentence, and
+waited for the user before printing it:
 
 | Case | Runs |
 |---|---:|
