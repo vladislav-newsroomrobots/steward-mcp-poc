@@ -12,7 +12,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p ui/tsconfig.json",
     "smoke": "node scripts/smoke.mjs",
-    "tunnel": "cloudflared tunnel --protocol http2 --url http://localhost:3000"
+    "tunnel": "cloudflared tunnel --protocol http2 --url http://localhost:3003"
   },
   "engines": {
     "node": ">=20.6.0"

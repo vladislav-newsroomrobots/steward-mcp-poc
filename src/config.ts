@@ -20,7 +20,7 @@ const csv = z
     .pipe(z.array(z.string()));
 
 const configSchema = z.object({
-    PORT: z.coerce.number().int().positive().max(65535).default(3000),
+    PORT: z.coerce.number().int().positive().max(65535).default(3003),
     HOST: z.string().min(1).default('127.0.0.1'),
     // Extra Host header values accepted by the DNS-rebinding guard. The tunnel
     // hostname goes here once stage 1 wires up the ChatGPT connection.

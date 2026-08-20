@@ -46,7 +46,7 @@ leaks between conversations.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PORT` | `3000` | listen port |
+| `PORT` | `3003` | listen port |
 | `HOST` | `127.0.0.1` | bind address |
 | `ALLOWED_HOSTS` | — | extra `Host` values for the DNS-rebinding guard, comma separated; `*` disables the check (see below) |
 | `LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
@@ -88,7 +88,7 @@ https://<random-name>.trycloudflare.com/mcp
     ↓
 Cloudflare Tunnel
     ↓
-http://localhost:3000/mcp
+http://localhost:3003/mcp
     ↓
 Steward MCP server
 ```
@@ -121,9 +121,9 @@ Check it before going further. A plain `GET /mcp` returns 404 and proves
 nothing — the endpoint expects a POST that opens a session:
 
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:3003/health
 
-curl -X POST http://localhost:3000/mcp \
+curl -X POST http://localhost:3003/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
@@ -429,7 +429,7 @@ waited for the user before printing it:
 Read the brief counts with:
 
 ```bash
-curl "http://localhost:3000/stats?format=text"
+curl "http://localhost:3003/stats?format=text"
 ```
 
 They tell you how many briefs each variant produced, not how many cycles
@@ -442,5 +442,5 @@ npm run build
 npm run smoke
 ```
 
-Or point MCP Inspector at `http://127.0.0.1:3000/mcp` (Streamable HTTP) while
+Or point MCP Inspector at `http://127.0.0.1:3003/mcp` (Streamable HTTP) while
 `npm run dev` is running.
